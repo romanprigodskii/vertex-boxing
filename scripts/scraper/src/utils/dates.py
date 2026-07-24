@@ -11,6 +11,8 @@ _FORMATS = (
     "%B %d, %Y",
     "%d %b %Y",
     "%b %d, %Y",
+    "%b %Y",   # BoxRec anonymous view shows month-year for historical bouts
+    "%B %Y",
     "%Y",
 )
 
