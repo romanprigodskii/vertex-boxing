@@ -120,12 +120,17 @@ def main():
     # market prob for the (alphabetically-canonical) fighter_a
     o = o[o.na.notna() & o.nb.notna()].copy()
     o["pair"] = o.apply(lambda r: "|".join(sorted([r.na, r.nb])), axis=1)
-    def mkt_pa(r):
-        ia, ib = 1 / r.close_a, 1 / r.close_b
-        pa = ia / (ia + ib)
-        return pa if r.na <= r.nb else 1 - pa
-    o["mkt_pa"] = o.apply(mkt_pa, axis=1)
-    omap = {(r.pair, r.d.date()): r.mkt_pa for r in o.itertuples(index=False)}
+
+    def orient(r):
+        # canonical fighter_a = alphabetically first; carry the REAL closing
+        # decimal odds (WITH vig) for each canonical side, plus the de-vigged
+        # market prob. Winners must settle at the real odds, not 1/mkt_pa.
+        ca, cb = (r.close_a, r.close_b) if r.na <= r.nb else (r.close_b, r.close_a)
+        ia, ib = 1 / ca, 1 / cb
+        return pd.Series([ia / (ia + ib), ca, cb])
+
+    o[["mkt_pa", "close_ca", "close_cb"]] = o.apply(orient, axis=1)
+    omap = {(r.pair, r.d.date()): (r.mkt_pa, r.close_ca, r.close_cb) for r in o.itertuples(index=False)}
 
     # match test bouts (±2 day tolerance)
     recs = []
@@ -134,8 +139,9 @@ def main():
         for dd in range(-2, 3):
             key = (pair, (r.dt + pd.Timedelta(days=dd)).date())
             if key in omap:
-                recs.append((r.fa, r.fb, r.dt, r.target, r.p_a, r.p_b, omap[key])); break
-    mt = pd.DataFrame(recs, columns=["fa", "fb", "dt", "target", "p_a", "p_b", "mkt_pa"])
+                mp, cca, ccb = omap[key]
+                recs.append((r.fa, r.fb, r.dt, r.target, r.p_a, r.p_b, mp, cca, ccb)); break
+    mt = pd.DataFrame(recs, columns=["fa", "fb", "dt", "target", "p_a", "p_b", "mkt_pa", "close_ca", "close_cb"])
     print(f"matched to closing odds: {len(mt):,} test bouts")
     if len(mt) < 20:
         print("too few matches yet (odds still fetching) — re-run when it finishes"); return
@@ -154,13 +160,16 @@ def main():
         macc = accuracy_score(yy, (s.model_pa > .5).astype(int))
         kacc = accuracy_score(yy, (s.mkt_pa > .5).astype(int))
         # value betting at the close: bet the side the model favors over the
-        # market by >3pp, settle at the closing decimal odds.
+        # market by >3pp, settle at the REAL closing decimal odds (with vig) —
+        # mkt_pa is used ONLY for value selection, never as the payout.
         roi = []
-        for pa_m, pa_k, y in zip(s.model_pa.values, s.mkt_pa.values, s.y.values):
+        for pa_m, pa_k, ca, cb, y in zip(
+            s.model_pa.values, s.mkt_pa.values, s.close_ca.values, s.close_cb.values, s.y.values
+        ):
             if pa_m > pa_k + .03:      # model likes A more than the market
-                roi.append((1 / pa_k - 1) if y == 1 else -1)
+                roi.append((ca - 1) if y == 1 else -1)
             elif (1 - pa_m) > (1 - pa_k) + .03:  # model likes B more
-                roi.append((1 / (1 - pa_k) - 1) if y == 0 else -1)
+                roi.append((cb - 1) if y == 0 else -1)
         if roi:
             roi = np.array(roi)
             rng = np.random.default_rng(42)
@@ -171,6 +180,30 @@ def main():
         else:
             roi_str = "no value bets"
         print(f"  {name} (n={len(s):,}): model LL {mll:.4f} acc {macc:.3f} | market LL {kll:.4f} acc {kacc:.3f}\n      close-line value ROI {roi_str}")
+
+    # ---- robustness stress-test (is the competitive edge real or cherry-picked?) ----
+    def roi_of(s):
+        r = []
+        for pa_m, pa_k, ca, cb, y in zip(s.model_pa.values, s.mkt_pa.values, s.close_ca.values, s.close_cb.values, s.y.values):
+            if pa_m > pa_k + .03:
+                r.append((ca - 1) if y == 1 else -1)
+            elif (1 - pa_m) > (1 - pa_k) + .03:
+                r.append((cb - 1) if y == 0 else -1)
+        return np.array(r)
+
+    print("\n  ROBUSTNESS — value-bet ROI across probability bands:")
+    for lo, hi in [(.20, .80), (.25, .75), (.30, .70), (.35, .65), (.40, .60)]:
+        r = roi_of(dec[(dec.mkt_pa >= lo) & (dec.mkt_pa <= hi)])
+        if len(r):
+            rng = np.random.default_rng(1)
+            fp = np.mean([rng.choice(r, len(r), replace=True).mean() for _ in range(1000)] > np.float64(0))
+            print(f"    band {lo:.0%}-{hi:.0%}: ROI {r.mean():+.1%} on {len(r)} bets (P>0={fp:.0%})")
+    print("  ROBUSTNESS — competitive (30-70%) ROI by test year:")
+    comp = comp.copy(); comp["yr"] = pd.to_datetime(comp.dt).dt.year
+    for yr, g in comp.groupby("yr"):
+        r = roi_of(g)
+        if len(r) >= 8:
+            print(f"    {yr}: ROI {r.mean():+.1%} on {len(r)} bets | model acc {(g.model_pa>.5).eq(g.y).mean():.3f} vs mkt {(g.mkt_pa>.5).eq(g.y).mean():.3f}")
 
 
 if __name__ == "__main__":
