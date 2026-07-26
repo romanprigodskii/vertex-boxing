@@ -41,7 +41,12 @@ ELO_K, ELO_INIT = 32.0, 1500.0
 STOPPAGE = {"ko", "tko", "rtd"}
 BASE = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b"]
 EXTRA = ["d_home", "d_promo_ties", "ref_stop_rate", "ref_bouts",
-         "judge_home_bias", "d_weight", "promo_bouts"]
+         "judge_home_bias", "d_weight", "promo_bouts", "city_home_bias"]
+# Measured on 6 upcoming cards: city/country/commission are published in advance
+# 6/6, promoter and venue 4/6, but referee, judges and weigh-in weights 0/6. So
+# the officials features are hindsight, not prediction — anything that must be
+# usable before the line closes has to come from this list.
+PREFIGHT = BASE + ["d_home", "d_promo_ties", "promo_bouts", "city_home_bias"]
 
 
 def load() -> pd.DataFrame:
@@ -49,7 +54,8 @@ def load() -> pd.DataFrame:
     q = """
         select e.date::date as dt, b.fighter_a_id as a, b.fighter_b_id as b,
                b.winner_id, b.is_draw, b.method::text as method,
-               e.location_country as country, e.promoter, b.referee,
+               e.location_country as country, e.location_city as city,
+               e.promoter, b.referee,
                b.judges, b.a_weight_lbs, b.b_weight_lbs
         from bout b join event e on e.id = b.event_id
         where b.status = 'completed' and e.date is not null
@@ -86,6 +92,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
     jud_n: dict = defaultdict(int)
     jud_home: dict = defaultdict(int)
     promo_n: dict = defaultdict(int)
+    city_n: dict = defaultdict(int)      # jurisdiction-level stand-in for the
+    city_home: dict = defaultdict(int)   # judges we cannot know in advance
 
     rows = []
     for r in df.itertuples(index=False):
@@ -114,6 +122,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
             (float(r.a_weight_lbs) - float(r.b_weight_lbs))
             if (r.a_weight_lbs is not None and r.b_weight_lbs is not None) else np.nan,
             promo_n[r.promoter] if r.promoter else 0,
+            (city_home[r.city] / city_n[r.city]) if (r.city and city_n[r.city] >= 20) else np.nan,
         ))
 
         # ---- update state AFTER snapshotting
@@ -132,6 +141,9 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
         if r.referee:
             ref_n[r.referee] += 1
             ref_stop[r.referee] += (r.method or "") in STOPPAGE
+        if r.city:
+            city_n[r.city] += 1
+            city_home[r.city] += (sa >= 1.0) if ha >= hb else (sa <= 0.0)
         if jids:
             home_side_a = ha >= hb          # who the crowd belonged to
             for j in jids:
@@ -177,18 +189,21 @@ def main() -> None:
 
     print("\nбез новых полей / с новыми полями (одни и те же бои)")
     ll_b, per_b, *_ = run("только рейтинги", feats, BASE, y, tr, te)
-    ll_x, per_x, m, cols = run("+ дом/рефери/судьи", feats, BASE + EXTRA, y, tr, te)
+    ll_p, per_p, mp, colsp = run("+ известное ЗАРАНЕЕ", feats, PREFIGHT, y, tr, te)
+    ll_x, per_x, m, cols = run("+ всё, вкл. судей", feats, BASE + EXTRA, y, tr, te)
 
-    d = per_b - per_x
+    d = per_b - per_p
     rng = np.random.default_rng(42)
     boot = np.array([rng.choice(d, len(d), replace=True).mean() for _ in range(4000)])
     lo, hi = np.percentile(boot, [2.5, 97.5])
-    print(f"\nвыигрыш от новых полей: {d.mean():+.4f} log-loss · "
-          f"95% интервал [{lo:+.4f}, {hi:+.4f}]")
+    print(f"\nПРИГОДНЫЙ выигрыш (только то, что известно до закрытия линии): "
+          f"{d.mean():+.4f} log-loss · 95% интервал [{lo:+.4f}, {hi:+.4f}]")
+    print(f"для сравнения, с судьями и весами (использовать нельзя): "
+          f"{(per_b - per_x).mean():+.4f}")
     print("вывод:", "новые поля значимо помогают" if lo > 0 else
           ("значимо вредят" if hi < 0 else "разница неотличима от нуля"))
 
-    imp = pd.Series(m.feature_importance("gain"), index=cols).sort_values(ascending=False)
+    imp = pd.Series(mp.feature_importance("gain"), index=colsp).sort_values(ascending=False)
     print("\nвклад признаков:", " · ".join(f"{k}={v:,.0f}" for k, v in imp.head(8).items()))
 
 
