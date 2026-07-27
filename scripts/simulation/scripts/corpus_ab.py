@@ -22,6 +22,7 @@ The difference in log-loss is the honest value of layer B.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from collections import defaultdict
@@ -68,6 +69,27 @@ def load_clean_keys() -> set[str]:
     return out
 
 
+
+def symmetrize(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Swap the two corners on a deterministic half of the bouts.
+
+    BoxRec prints the winner first and our ingest keeps that order, so in the
+    database fighter A wins 87% of the time. Without this, "always predict A"
+    scores 0.87 accuracy and every model looks strong for the wrong reason —
+    the slot order IS the label. Flipping half the rows by a hash of the bout
+    makes it ~50/50 and forces the features to do the work.
+    """
+    ca, cb = ("a", "b") if "a" in df.columns else ("a_id", "b_id")
+    keys = (df["dt"].dt.strftime("%Y%m%d") + "|" + df[ca].astype(str)
+            + "|" + df[cb].astype(str))
+    flip = keys.map(lambda k: hashlib.blake2b(k.encode(), digest_size=4).digest()[-1] % 2 == 1).values
+    out = df.copy()
+    for x, y in ((ca, cb), ("a_weight_lbs", "b_weight_lbs"), ("a_name", "b_name")):
+        if x in out.columns and y in out.columns:
+            out.loc[flip, [x, y]] = out.loc[flip, [y, x]].values
+    return out
+
+
 def load_db() -> pd.DataFrame:
     conn = get_connection()
     q = """
@@ -87,6 +109,7 @@ def load_db() -> pd.DataFrame:
     conn.close()
     df["dt"] = pd.to_datetime(df["dt"])
     df = df[(df["dt"] >= "1900-01-01") & (df["dt"] <= pd.Timestamp.today())]
+    df = symmetrize(df)
     print(f"база: {len(df):,} боёв с исходом ({df['dt'].min().date()} → {df['dt'].max().date()})")
     return df.reset_index(drop=True)
 
@@ -178,7 +201,11 @@ def main() -> None:
 
     print("FULL — рейтинги по всем боям, включая BoxRec")
     f_full = replay(df, np.ones(len(df), dtype=bool))
-    ll_f, acc_f, per_f = evaluate("FULL", f_full, y, is_train.values, is_test.values)
+    # Train BOTH on the SAME rows. Letting FULL train on all 200k bouts while
+    # CLEAN gets 30k would compare training populations, not the value of the
+    # extra rating history — and the eval set is the notable layer, so the
+    # regional bulk would just be a distribution mismatch working against it.
+    ll_f, acc_f, per_f = evaluate("FULL", f_full, y, (is_train & in_clean).values, is_test.values)
 
     # paired bootstrap on per-bout losses — the two models score the SAME rows,
     # so the pairing removes most of the variance and the CI is the honest answer

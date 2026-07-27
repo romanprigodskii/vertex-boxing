@@ -25,6 +25,7 @@ so the only difference is whether the extra columns are visible.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -49,6 +50,26 @@ EXTRA = ["d_home", "d_promo_ties", "ref_stop_rate", "ref_bouts",
 PREFIGHT = BASE + ["d_home", "d_promo_ties", "promo_bouts", "city_home_bias"]
 
 
+
+def symmetrize(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Swap the two corners on a deterministic half of the bouts.
+
+    BoxRec prints the winner first and our ingest keeps that order, so in the
+    database fighter A wins 87% of the time. Without this, "always predict A"
+    scores 0.87 accuracy and every model looks strong for the wrong reason —
+    the slot order IS the label. Flipping half the rows by a hash of the bout
+    makes it ~50/50 and forces the features to do the work.
+    """
+    keys = (df["dt"].dt.strftime("%Y%m%d") + "|" + df["a"].astype(str)
+            + "|" + df["b"].astype(str))
+    flip = keys.map(lambda k: hashlib.blake2b(k.encode(), digest_size=4).digest()[-1] % 2 == 1).values
+    out = df.copy()
+    for x, y in (("a", "b"), ("a_weight_lbs", "b_weight_lbs"), ("a_name", "b_name")):
+        if x in out.columns and y in out.columns:
+            out.loc[flip, [x, y]] = out.loc[flip, [y, x]].values
+    return out
+
+
 def load() -> pd.DataFrame:
     conn = get_connection()
     q = """
@@ -66,6 +87,7 @@ def load() -> pd.DataFrame:
     conn.close()
     df["dt"] = pd.to_datetime(df["dt"])
     df = df[(df["dt"] >= "1950-01-01") & (df["dt"] <= pd.Timestamp.today())]
+    df = symmetrize(df)
     print(f"боёв с исходом: {len(df):,} ({df['dt'].min().date()} → {df['dt'].max().date()})")
     return df.reset_index(drop=True)
 
