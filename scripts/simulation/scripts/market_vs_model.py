@@ -54,7 +54,19 @@ FEATS = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b",
          "weight_lbs",     # division as its nominal limit: heavies stop people, flies do not
          "d_form3",        # win rate over the last three bouts
          "d_sos3",         # mean opponent Elo over the last three
-         "d_momentum"]     # Elo gained or lost over the last three
+         "d_momentum",     # Elo gained or lost over the last three
+         # Ring rust. A difference alone cannot tell "both fresh" from "both
+         # rusty", and the effect is not linear in days — a year off is far
+         # worse than twice six months.
+         "lay_a", "lay_b",        # log-days since each man last fought
+         "d_since_win",           # days since each last WON, differenced
+         "d_activity",            # bouts in the trailing two years
+         "both_rusty"]            # neither has fought in six months
+# Measured on 416k bouts: the layoff curve is an inverted U — back inside three
+# weeks wins 35.7%, WORSE than a two-year layoff (38.0%), against an optimum of
+# 55.6% at 3-6 months. Encoding that explicitly (short-notice and optimal-rest
+# flags) changed log-loss by -0.0008, i.e. nothing: the dip is not about rest,
+# it is about WHO takes a fight on two weeks' notice, and Elo already knows.
 
 
 def norm(s):
@@ -103,6 +115,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
     ko, koed, losses = defaultdict(int), defaultdict(int), defaultdict(int)
     sos_sum = defaultdict(float)
     first = {}
+    last_win: dict = {}
+    hist: dict = defaultdict(list)     # bout dates, for the activity window
     from collections import deque
     form = defaultdict(lambda: deque(maxlen=3))      # last three results
     opp3 = defaultdict(lambda: deque(maxlen=3))      # last three opponents' Elo
@@ -132,6 +146,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
             (np.mean(form[a]) if form[a] else 0.5) - (np.mean(form[b]) if form[b] else 0.5),
             (np.mean(opp3[a]) if opp3[a] else ELO_INIT) - (np.mean(opp3[b]) if opp3[b] else ELO_INIT),
             ((ea - elo3[a][0]) if elo3[a] else 0.0) - ((eb - elo3[b][0]) if elo3[b] else 0.0),
+            np.log1p((r.dt - last[a]).days) if a in last else np.nan,
+            np.log1p((r.dt - last[b]).days) if b in last else np.nan,
+            ((r.dt - last_win[a]).days if a in last_win else 1500)
+            - ((r.dt - last_win[b]).days if b in last_win else 1500),
+            sum(1 for d in hist[a] if (r.dt - d).days <= 730)
+            - sum(1 for d in hist[b] if (r.dt - d).days <= 730),
+            int((a in last and (r.dt - last[a]).days > 180)
+                and (b in last and (r.dt - last[b]).days > 180)),
         ))
         sa = 0.5 if r.is_draw else (1.0 if r.winner_id == a else 0.0)
         exp = 1.0 / (1.0 + 10 ** ((eb - ea) / 400.0))
@@ -141,6 +163,9 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:
         wins[a] += sa >= 1.0; wins[b] += sa <= 0.0
         last[a] = last[b] = r.dt
         first.setdefault(a, r.dt); first.setdefault(b, r.dt)
+        hist[a].append(r.dt); hist[b].append(r.dt)
+        if sa >= 1.0: last_win[a] = r.dt
+        if sa <= 0.0: last_win[b] = r.dt
         form[a].append(sa); form[b].append(1 - sa)
         opp3[a].append(eb); opp3[b].append(ea)
         elo3[a].append(ea); elo3[b].append(eb)
@@ -211,7 +236,17 @@ def main() -> None:
     mdl = lgb.train(params, dtr, num_boost_round=2000, valid_sets=[dva],
                     callbacks=[lgb.early_stopping(80, verbose=False)])
     print(f"модель обучена на {len(big):,} боях (было 470)")
-    p_mod = mdl.predict(X.iloc[te], num_iteration=mdl.best_iteration)
+    # Calibrate on the held-out tail of training: boosting on an imbalanced
+    # target is systematically over-confident, and log-loss punishes that
+    # harder than it punishes being wrong.
+    from sklearn.isotonic import IsotonicRegression
+    p_va = mdl.predict(feats.iloc[big[cut:]], num_iteration=mdl.best_iteration)
+    iso = IsotonicRegression(out_of_bounds="clip").fit(p_va, y_all[big[cut:]])
+    raw = mdl.predict(X.iloc[te], num_iteration=mdl.best_iteration)
+    p_mod = np.clip(iso.predict(raw), 1e-4, 1 - 1e-4)
+    from sklearn.metrics import log_loss as _ll
+    print(f"калибровка: до {_ll(y[te], np.clip(raw,1e-6,1-1e-6)):.4f} → "
+          f"после {_ll(y[te], p_mod):.4f}")
     pm, yy = p_mkt[te], y[te]
 
     ll_mod = log_loss(yy, np.clip(p_mod, 1e-6, 1 - 1e-6))
