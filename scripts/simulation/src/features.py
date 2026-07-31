@@ -4,16 +4,21 @@ There were five copies of replay() with drifting defaults, so two commits'
 numbers were never comparable and a fix like "the dates are truncated" had to be
 made five times. Experiments are thin wrappers over this now.
 
-Everything here is knowable BEFORE the opening bell. Judges, referee, weigh-in
-weights and the finish are deliberately absent: they are on the event page but
-not on the card, so a model that uses them is explaining the past, not
-predicting the future.
+Everything here is knowable BEFORE the opening bell, and the line runs through
+the middle of the event page rather than around it. The finish — method, round,
+the judges' totals — is the one thing that is NOT knowable, so it never becomes
+a feature of the bout it came from and may only update a rating for the next
+one. But the weigh-in happened yesterday and the officials were assigned before
+that, so the scales and the names of the referee and the three judges are on the
+card by the time the closing line is set. They are separate groups (WEIGH, OFF)
+because they are fair against the CLOSE and not against the open, and a run that
+uses them may not be quoted as evidence that we could have bet early.
 
 And "knowable before the bell" is not the same as "not contaminated by the
 future". Whether OUR database happens to hold a man's date of birth is decided
 by a crawl that ran in 2026 and targeted the fighters the odds feed quotes —
 so the shape of what is missing is hindsight, and it leaked the winner. See
-AGE below.
+AGE below, and scripts/leak_check.py, which makes the test permanent.
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 4
+FEATS_VERSION = 5
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -52,7 +57,10 @@ PAIRED = [("a", "b"), ("a_name", "b_name"),
           ("a_losses_before", "b_losses_before"),
           ("a_draws_before", "b_draws_before"),
           ("a_dob", "b_dob"), ("a_height", "b_height"), ("a_stance", "b_stance"),
-          ("a_lbs", "b_lbs"), ("a_score", "b_score")]
+          ("a_lbs", "b_lbs"), ("a_score", "b_score"),
+          # the judges' individual cards are per-corner too, and they are
+          # comma-joined strings, so swapping the strings swaps the corners
+          ("judge_a", "judge_b")]
 
 BASE = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b",
         "d_home", "d_promo_ties", "promo_bouts", "city_home_bias",
@@ -106,6 +114,16 @@ WEIGH = ["d_lbs", "over_a", "over_b", "d_over", "d_lbs_hist", "lbs_known"]
 # the judges hand out a graded number on 144,337 of them for nothing.
 SCORE = ["d_melo", "d_dom", "d_dom_win", "d_dom_loss", "d_dom3",
          "dom_n_a", "dom_n_b"]
+# The third man in the ring and the three at the tables. The referee decides
+# WHETHER the fight reaches the cards, which decides which of a fighter's
+# qualities matter; the judges decide WHO wins once it does, and the sport's
+# own literature puts the home fighter's edge on points at 0.74. Both are
+# assigned before the bell. ref_stop_res is the referee's rate net of what
+# bouts at that distance produce anyway — without it the feature is mostly a
+# label for the kind of card he works, which the model already knows.
+OFF = ["ref_stop", "ref_early", "ref_stop_res", "ref_n",
+       "ref_home", "d_home_ref",
+       "jud_home", "d_home_jud", "jud_fav", "d_elo_jud", "jud_n", "off_known"]
 
 ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
@@ -114,6 +132,8 @@ EVERY = ALL + NEW
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
 EVERY_S = EVERY_W + SCORE
+# …and the officials who worked the bout
+EVERY_O = EVERY_S + OFF
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -379,9 +399,21 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     dom_l = defaultdict(lambda: {"s": 0.0, "n": 0})
     dom3 = defaultdict(lambda: deque(maxlen=3))
     MELO_K = 0.10
+    # officials. Shrunk toward the running global rate with a pseudo-count, so a
+    # referee's third bout does not hand the model a 100% stoppage rate.
+    ref = defaultdict(lambda: {"n": 0, "stop": 0, "early": 0, "res": 0.0,
+                               "hn": 0, "hw": 0})
+    jud = defaultdict(lambda: {"n": 0, "home": 0, "hn": 0, "fav": 0})
+    sched_stop = defaultdict(lambda: [0, 0])     # distance → [stoppages, bouts]
+    glob = [0, 0]
+    PSEUDO = 20.0
     card = df.groupby("event_slug")["a"].transform("size").to_numpy()
     has_w = "a_lbs" in df.columns
     has_s = "a_score" in df.columns
+    has_o = "ref_id" in df.columns
+
+    def _shrunk(k, n, prior):
+        return (k + PSEUDO * prior) / (n + PSEUDO)
 
     _DEC = 3.0 * 365.25                              # half-life of "form", in days
 
@@ -485,6 +517,33 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                    - (np.mean(dom3[b]) if dom3[b] else np.nan),
                    np.log1p(dom[a]["n"]), np.log1p(dom[b]["n"]))
 
+        off = ()
+        if has_o:
+            g_stop = glob[0] / glob[1] if glob[1] else 0.35
+            rid = getattr(r, "ref_id", None)
+            R = ref[rid] if rid else None
+            jids = getattr(r, "judge_ids", None)
+            panel = [jud[k] for k in jids.split(",")] if isinstance(jids, str) and jids else []
+            # who is the more local man; nan when the venue tells us nothing
+            hh = (ha - hb) if (ha != hb) else np.nan
+            def _panel(key, hkey):
+                vals = [_shrunk(p[key], p[hkey], 0.5) for p in panel if p[hkey]]
+                return float(np.mean(vals)) if vals else np.nan
+            r_home = _shrunk(R["hw"], R["hn"], 0.5) if (R and R["hn"]) else np.nan
+            j_home = _panel("home", "hn")
+            j_fav = _panel("fav", "n")
+            off = (
+                _shrunk(R["stop"], R["n"], g_stop) if R and R["n"] else np.nan,
+                _shrunk(R["early"], R["n"], g_stop * 0.4) if R and R["n"] else np.nan,
+                (R["res"] / R["n"]) if R and R["n"] >= 10 else np.nan,
+                np.log1p(R["n"]) if R else np.nan,
+                r_home, hh * (r_home - 0.5) if hh == hh else np.nan,
+                j_home, hh * (j_home - 0.5) if hh == hh else np.nan,
+                j_fav, math.tanh((ea - eb) / 200.0) * (j_fav - 0.5),
+                np.log1p(np.mean([p["n"] for p in panel])) if panel else np.nan,
+                float(bool(rid) and bool(panel)),
+            )
+
         rows.append((
             # ---- BASE
             ea - eb, na - nb,
@@ -568,6 +627,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             *wgt,
             # ---- SCORE (absent unless the snapshot carries the cards)
             *scr,
+            # ---- OFF (absent unless the snapshot carries the officials)
+            *off,
         ))
 
         # ------------------------------------------------------------- update
@@ -670,6 +731,42 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 lbs_hist[a]["s"] += wa_; lbs_hist[a]["n"] += 1
             if not np.isnan(wb_):
                 lbs_hist[b]["s"] += wb_; lbs_hist[b]["n"] += 1
+        if has_o:
+            # strictly after the row is written: an official's tendency is read
+            # from the bouts he worked BEFORE this one and never including it
+            base = sched_stop[sched if sched == sched else -1]
+            exp_stop = (base[0] / base[1]) if base[1] >= 50 else (
+                glob[0] / glob[1] if glob[1] else 0.35)
+            base[0] += stopped; base[1] += 1
+            glob[0] += stopped; glob[1] += 1
+            local = (a if ha > hb else b) if ha != hb else None
+            if rid:
+                R = ref[rid]
+                R["n"] += 1
+                R["stop"] += stopped
+                R["early"] += int(stopped and rounds == rounds and rounds <= 3)
+                R["res"] += stopped - exp_stop
+                if local is not None and not r.is_draw:
+                    R["hn"] += 1
+                    R["hw"] += int(str(r.winner_id) == str(local))
+            ja = getattr(r, "judge_a", None)
+            jb = getattr(r, "judge_b", None)
+            if panel and isinstance(ja, str) and isinstance(jb, str):
+                try:
+                    sa_l = [float(x) for x in ja.split(",")]
+                    sb_l = [float(x) for x in jb.split(",")]
+                except ValueError:
+                    sa_l = sb_l = []
+                hi = a if ea >= eb else b        # the man the ratings preferred
+                for p, xa, xb in zip(panel, sa_l, sb_l):
+                    if xa == xb:
+                        continue
+                    picked = a if xa > xb else b
+                    p["n"] += 1
+                    p["fav"] += int(picked == hi)
+                    if local is not None:
+                        p["hn"] += 1
+                        p["home"] += int(picked == local)
         if has_s:
             dm = dominance(sa, getattr(r, "a_score", np.nan),
                            getattr(r, "b_score", np.nan), meth, rf, sched)
@@ -705,7 +802,9 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             city_n[r.city] += 1
             city_home[r.city] += (sa >= 1.0) if ha >= hb else (sa <= 0.0)
 
-    full = (EVERY_S if has_s else EVERY_W) if has_w else EVERY
+    full = EVERY
+    if has_w:
+        full = EVERY_O if has_o else (EVERY_S if has_s else EVERY_W)
     out = pd.DataFrame(rows, columns=[c for c in full if c not in BT])
     for k, v in bt_ratings(df).items():
         out[k] = v

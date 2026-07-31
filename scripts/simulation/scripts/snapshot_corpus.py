@@ -60,6 +60,26 @@ select e.date::date          as dt,
        case when jsonb_typeof(b.judges) = 'array' then
          (select avg((j->>'b')::numeric)::float8 from jsonb_array_elements(b.judges) j
           where j ? 'b') end as b_score,
+       -- The officials. A referee's taste for an early stoppage correlates 0.76
+       -- between the first and second halves of his own career, on 1,235 men
+       -- with 60 bouts or more — that is a personality, not noise, and the model
+       -- has never seen it. Judges come with their individual cards, so each
+       -- one's leaning is measurable on his own opinion rather than on the
+       -- verdict he was outvoted into. Assigned by the commission before the
+       -- bell and printed on the card, so fair against a closing line.
+       b.referee_boxrec_id as ref_id,
+       case when jsonb_typeof(b.judges) = 'array' then
+         (select string_agg(j->>'boxrec_id', ',' order by o)
+          from jsonb_array_elements(b.judges) with ordinality t(j, o)
+          where j ? 'a' and j ? 'b') end as judge_ids,
+       case when jsonb_typeof(b.judges) = 'array' then
+         (select string_agg(j->>'a', ',' order by o)
+          from jsonb_array_elements(b.judges) with ordinality t(j, o)
+          where j ? 'a' and j ? 'b') end as judge_a,
+       case when jsonb_typeof(b.judges) = 'array' then
+         (select string_agg(j->>'b', ',' order by o)
+          from jsonb_array_elements(b.judges) with ordinality t(j, o)
+          where j ? 'a' and j ? 'b') end as judge_b,
        fa.dob                as a_dob,
        fb.dob                as b_dob,
        fa.height_cm          as a_height,
