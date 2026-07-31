@@ -32,7 +32,9 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts" / "simulation"))
 from src import features as F  # noqa: E402
 
-ODDS = ROOT / "imports" / "staging" / "proboxingodds.parquet"
+_ODDS_V2 = ROOT / "imports" / "staging" / "proboxingodds_v2.parquet"
+_ODDS_V1 = ROOT / "imports" / "staging" / "proboxingodds.parquet"
+ODDS = _ODDS_V2 if _ODDS_V2.exists() else _ODDS_V1
 CACHE = ROOT / "imports" / "staging"
 _PAREN = re.compile(r"\[.*?\]|\(.*?\)")
 
@@ -142,8 +144,12 @@ def join_odds(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     df["pair"] = [f"{min(x, y)}|{max(x, y)}" if x and y else None
                   for x, y in zip(df["na"], df["nb"])]
 
+    # best_* is the best price across the ten books on the board; close_* is
+    # the worst. The old file has only the worst, so carry whichever exist.
     cars = ["close_a", "close_b", "open_a", "open_b"]
     od = pd.read_parquet(ODDS)
+    if "best_a" in od.columns:
+        cars += ["best_a", "best_b"]
     od["dt"] = pd.to_datetime(od["date"])
     od["na"], od["nb"] = od["a"].map(norm), od["b"].map(norm)
     od = od.dropna(subset=["na", "nb", "close_a", "close_b"])
@@ -153,9 +159,15 @@ def join_odds(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     # orient every row onto the sorted pair key first, so the two mirror copies
     # of the same bout become comparable instead of merely duplicated
     flip = od["na"] > od["nb"]
-    for x, y in (("na", "nb"), ("close_a", "close_b"), ("open_a", "open_b")):
+    pairs = [("na", "nb"), ("close_a", "close_b"), ("open_a", "open_b")]
+    if "best_a" in od.columns:
+        pairs.append(("best_a", "best_b"))
+    for x, y in pairs:
         od.loc[flip, [x, y]] = od.loc[flip, [y, x]].values
     od["pair"] = od["na"] + "|" + od["nb"]
+    # integrity is judged on the WORST price, which must always imply more than
+    # 100% — a best-of-ten-books line legitimately implies less, and filtering
+    # that would throw away exactly the sharpest rows
     od["over"] = 1 / od["close_a"].astype(float) + 1 / od["close_b"].astype(float)
     od["sane"] = (od["over"] > 1.0) & (od["over"] < 1.25)
     # a sane mirror beats an insane one; otherwise keep the first
@@ -307,6 +319,8 @@ def main() -> None:  # noqa: PLR0915
     cb = np.where(same, j[f"{which}_b"], j[f"{which}_a"]).astype(float)
     oa = np.where(same, j["open_a"], j["open_b"]).astype(float)
     ob = np.where(same, j["open_b"], j["open_a"]).astype(float)
+    if which == "best" and "best_a" not in j.columns:
+        raise SystemExit("this odds file has no best_* column — re-crawl first")
     kk = np.isfinite(ca) & np.isfinite(cb) & (ca > 1) & (cb > 1)
     if not kk.all():
         j, ca, cb, oa, ob = j[kk].reset_index(drop=True), ca[kk], cb[kk], oa[kk], ob[kk]

@@ -97,9 +97,11 @@ def main() -> None:
     oa = d["oa"] if "oa" in d else np.full_like(ca, np.nan)
     ob = d["ob"] if "ob" in d else np.full_like(cb, np.nan)
     has_open = bool(np.isfinite(oa).any())
-    # the blend takes the market as an input; if that market was the CLOSE then
-    # asking it to beat the close is not a test of anything
-    blend_saw_close = str(d["price"]) == "close" if "price" in d else True
+    # ANY closing price, not just the one literally called "close": the best-of-
+    # market line is a closing price too, and a blend fed with it beats the close
+    # by construction. The first version of this guard tested == "close" and let
+    # the best-price run through, which produced a spurious +18% ROI.
+    blend_saw_close = str(d["price"]) != "open" if "price" in d else True
     print(f"{label}: {len(y):,} боёв · маржа на закрытии {(1 / ca + 1 / cb - 1).mean():.2%}"
           + (f" · на открытии {(1 / oa + 1 / ob - 1)[np.isfinite(oa)].mean():.2%}"
              if has_open else ""))

@@ -38,6 +38,17 @@ def ll(q, y):
 def main() -> None:
     labels = sys.argv[1:] or ["final"]
     runs = [(x, np.load(PRED / f"{x}.npz", allow_pickle=True)) for x in labels]
+    # two readings of the same board can keep different bouts — a row with no
+    # best price survives one and not the other — so compare on what they share
+    common = runs[0][1]["key"]
+    for _, d in runs[1:]:
+        common = np.intersect1d(common, d["key"])
+    sel = []
+    for lab, d in runs:
+        ix = {k: i for i, k in enumerate(d["key"])}
+        sel.append((lab, d, np.array([ix[k] for k in common])))
+    runs = [(lab, {k: d[k][s] if d[k].shape[:1] == d["key"].shape else d[k]
+                   for k in ("p", "y", "p_mkt")}) for lab, d, s in sel]
     y, pm = runs[0][1]["y"], runs[0][1]["p_mkt"]
     q = np.minimum(pm, 1 - pm)             # how close the market thought it was
     head = f"{'полоса от 50/50':>18s} {'n':>6s} {'рынок':>8s}"
