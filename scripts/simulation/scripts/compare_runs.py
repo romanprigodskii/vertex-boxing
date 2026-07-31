@@ -26,9 +26,15 @@ def main() -> None:
         print("saved:", ", ".join(sorted(p.stem for p in PRED.glob("*.npz"))))
         return
     a, b = (np.load(PRED / f"{x}.npz", allow_pickle=True) for x in sys.argv[1:3])
-    suff = "_corp" if "--corpus" in sys.argv else ""
+    prem = "--prem" in sys.argv
+    suff = "_corp" if ("--corpus" in sys.argv or prem) else ""
     ka, kb = a["key" + suff], b["key" + suff]
     common = np.intersect1d(ka, kb)
+    if prem:
+        # only the bouts the market would have priced: same instrument, same
+        # population as the quoted set, a hundred times the bouts
+        keep = set(ka[a["prem_corp"]].tolist()) & set(kb[b["prem_corp"]].tolist())
+        common = np.array([k for k in common if k in keep])
     ia = {k: i for i, k in enumerate(ka)}
     ib = {k: i for i, k in enumerate(kb)}
     sa = np.array([ia[k] for k in common])

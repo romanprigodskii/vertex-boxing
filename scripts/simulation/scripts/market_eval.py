@@ -15,6 +15,7 @@ import json
 import re
 import sys
 import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import numpy as np
@@ -28,15 +29,16 @@ ODDS = ROOT / "imports" / "staging" / "proboxingodds.parquet"
 CACHE = ROOT / "imports" / "staging"
 _PAREN = re.compile(r"\[.*?\]|\(.*?\)")
 
+GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO,
+          "age": F.AGE, "level": F.LEVEL, "h2h": F.H2H, "dur": F.DUR,
+          "form": F.FORM, "level2": F.LEVEL2, "elo2": F.ELO2, "bt": F.BT,
+          "miss": F.MISS, "weigh": F.WEIGH}
+
 SETS = {
     "base": F.BASE,
-    "base+record": F.BASE + F.RECORD,
-    "base+sos2": F.BASE + F.SOS2,
-    "base+glicko": F.BASE + F.GLICKO,
-    "base+age": F.BASE + F.AGE,
-    "base+level": F.BASE + F.LEVEL,
-    "all": F.ALL,
-    "all-noage": F.BASE + F.RECORD + F.SOS2 + F.GLICKO + F.LEVEL,
+    "all": F.ALL,       # the 2026-07-31 feature set, with the age leak fixed
+    "every": F.EVERY,   # everything computable without the scales
+    "everyw": F.EVERY_W,  # …and with them — needs a snapshot that carries them
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
@@ -44,6 +46,21 @@ SETS = {
     # difference the choice makes.
     "best": F.BASE + F.RECORD + F.GLICKO + F.AGE + F.LEVEL,
 }
+
+
+def resolve(spec: str) -> list[str]:
+    """'all', or groups joined by '+' — 'base+glicko+bt'. One flag covers both
+    the named sets and any ablation, so a run is described by what it used."""
+    if spec in SETS:
+        return SETS[spec]
+    cols: list[str] = []
+    for part in spec.split("+"):
+        src = GROUPS.get(part) or SETS.get(part)
+        if src is None:
+            raise SystemExit(f"unknown feature group {part!r}; "
+                             f"have {', '.join(GROUPS)} or {', '.join(SETS)}")
+        cols += [c for c in src if c not in cols]
+    return cols
 
 
 def norm(s):
@@ -61,8 +78,12 @@ def arg(name: str, default: str) -> str:
 
 
 def build(tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Symmetrized corpus + its features, cached — the replay is minutes."""
-    fc, dc = CACHE / f"feats_{tag}.parquet", CACHE / f"sym_{tag}.parquet"
+    """Symmetrized corpus + its features, cached — the replay is minutes.
+
+    The cache carries the feature-set version in its name: a matrix written by
+    an older definition of replay() can never be picked up by a newer one."""
+    fc = CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet"
+    dc = CACHE / f"sym_{tag}.parquet"
     if fc.exists() and dc.exists():
         return pd.read_parquet(dc), pd.read_parquet(fc)
     df = F.symmetrize(F.load(tag))
@@ -73,31 +94,116 @@ def build(tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return df, feats
 
 
-def join_odds(df: pd.DataFrame) -> pd.DataFrame:
-    """Pair + date, one day either side. The pair has to be exact; the day is
-    allowed to slip because a card that starts late local time is dated the next
-    day by one source and not the other."""
+def _same_man(x: str, y: str) -> bool:
+    """Is this the same fighter under two spellings? Deliberately strict: a
+    wrong join does not make a noisy yardstick, it makes a false one."""
+    if x == y:
+        return True
+    tx, ty = set(x.split()), set(y.split())
+    if tx <= ty or ty <= tx:
+        return True
+    if len(tx & ty) >= 2:
+        return True
+    return SequenceMatcher(None, x, y).ratio() > 0.90
+
+
+def join_odds(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
+    """Pair + date, one day either side. The day is allowed to slip because a
+    card that starts late local time is dated the next day by one source and
+    not the other.
+
+    Two things this used to get wrong, both measured:
+
+    (1) The pair had to match EXACTLY on both corners, and 27% of the odds file
+    failed on spelling alone — 'kenshiro teraji' against 'ken shiro'. The
+    quoted set is the instrument starved of power, so throwing away a quarter
+    of it to a hyphen is the expensive kind of tidy. One corner must still
+    match exactly; the other is allowed to be the same man under another name.
+
+    (2) A two-way book that implies 4.9% or 196% is not a price, it is a
+    scraping error, and 4.1% of the file is like that. Proportional de-vig
+    turns 37.00-vs-46.00 into a coin flip and bet_sim then settles a real
+    stake at a fictitious longshot. Mirror rows are used to repair them where
+    possible and they are dropped where not.
+    """
     df = df.copy()
     df["na"], df["nb"] = df["a_name"].map(norm), df["b_name"].map(norm)
     df["pair"] = [f"{min(x, y)}|{max(x, y)}" if x and y else None
                   for x, y in zip(df["na"], df["nb"])]
 
+    cars = ["close_a", "close_b", "open_a", "open_b"]
     od = pd.read_parquet(ODDS)
     od["dt"] = pd.to_datetime(od["date"])
     od["na"], od["nb"] = od["a"].map(norm), od["b"].map(norm)
     od = od.dropna(subset=["na", "nb", "close_a", "close_b"])
-    od["pair"] = [f"{min(x, y)}|{max(x, y)}" for x, y in zip(od["na"], od["nb"])]
-    od = od.drop_duplicates(subset=["pair", "dt"])
+    od = od[od["na"] != od["nb"]]
+    n_raw = len(od)
 
-    dbi = df.reset_index()[["index", "pair", "dt"]].dropna(subset=["pair"])
-    cand = dbi.merge(od[["pair", "dt", "na", "close_a", "close_b"]], on="pair",
+    # orient every row onto the sorted pair key first, so the two mirror copies
+    # of the same bout become comparable instead of merely duplicated
+    flip = od["na"] > od["nb"]
+    for x, y in (("na", "nb"), ("close_a", "close_b"), ("open_a", "open_b")):
+        od.loc[flip, [x, y]] = od.loc[flip, [y, x]].values
+    od["pair"] = od["na"] + "|" + od["nb"]
+    od["over"] = 1 / od["close_a"].astype(float) + 1 / od["close_b"].astype(float)
+    od["sane"] = (od["over"] > 1.0) & (od["over"] < 1.25)
+    # a sane mirror beats an insane one; otherwise keep the first
+    od = (od.sort_values(["pair", "dt", "sane"], ascending=[True, True, False],
+                         kind="stable")
+            .drop_duplicates(subset=["pair", "dt"], keep="first"))
+    bad = int((~od["sane"]).sum())
+    od = od[od["sane"]]
+
+    dbi = df.reset_index()[["index", "pair", "na", "nb", "dt"]].dropna(subset=["pair"])
+    cand = dbi.merge(od[["pair", "dt", "na", *cars]], on="pair",
                      how="inner", suffixes=("", "_o"))
     cand["gap"] = (cand["dt"] - cand["dt_o"]).abs().dt.days
-    cand = cand[cand["gap"] <= 1].sort_values("gap")
-    cand = cand.drop_duplicates("index").drop_duplicates(subset=["pair", "dt_o"])
-    cand = cand.rename(columns={"na": "na_o"})
-    j = df.reset_index().merge(cand[["index", "na_o", "close_a", "close_b", "gap"]],
+    cand = cand[cand["gap"] <= 1].copy()
+    # which corner holds close_a. Carried as a flag, never re-derived from the
+    # names downstream: an alias match has, by construction, two spellings that
+    # are not equal, and a name test would silently invert its price.
+    cand["swap"] = (cand["na"] != cand["na_o"]).to_numpy()
+    n_exact = cand["pair"].nunique()
+
+    # --- second pass: one corner exact, the other the same man under another
+    # name. Indexed by (single name, date) so it is a lookup, not a cross join.
+    got = set(zip(cand["pair"], cand["dt_o"]))
+    miss = od[~pd.MultiIndex.from_arrays([od["pair"], od["dt"]]).isin(got)]
+    # only the days a missing odds row could belong to — indexing all 413k
+    # bouts to chase ~1,600 of them is 250x the work for the same answer
+    days = {d + k for d in miss["dt"].map(pd.Timestamp.toordinal) for k in (-1, 0, 1)}
+    near = dbi[dbi["dt"].map(pd.Timestamp.toordinal).isin(days)]
+    by_name: dict = {}
+    for t in near.itertuples(index=False):
+        d0 = t.dt.toordinal()
+        for nm, other, is_a in ((t.na, t.nb, True), (t.nb, t.na, False)):
+            for dd in (d0 - 1, d0, d0 + 1):
+                by_name.setdefault((nm, dd), []).append((t.index, other, t.dt, is_a))
+    extra = []
+    for o in miss.itertuples(index=False):
+        d0 = o.dt.toordinal()
+        for nm, other in ((o.na, o.nb), (o.nb, o.na)):
+            hits = [h for h in by_name.get((nm, d0), []) if _same_man(h[1], other)]
+            if len(hits) == 1:
+                ix, _, dt, is_a = hits[0]
+                extra.append({"index": ix, "pair": o.pair, "dt_o": o.dt,
+                              "swap": (nm == o.na) != is_a,
+                              "close_a": o.close_a, "close_b": o.close_b,
+                              "open_a": o.open_a, "open_b": o.open_b,
+                              "gap": abs((dt - o.dt).days)})
+                break
+    if extra:
+        cand = pd.concat([cand, pd.DataFrame(extra)], ignore_index=True)
+
+    cand = (cand.sort_values(["gap", "dt_o", "index"], kind="stable")
+                .drop_duplicates("index", keep="first")
+                .drop_duplicates(subset=["pair", "dt_o"], keep="first"))
+    j = df.reset_index().merge(cand[["index", "swap", *cars, "gap"]],
                                on="index", how="inner")
+    if verbose:
+        print(f"  odds: {n_raw:,} rows → {bad:,} impossible books dropped · "
+              f"{n_exact:,} matched on the exact pair · "
+              f"{len(extra):,} recovered by alias")
     return j[~j["is_draw"]].reset_index(drop=True)
 
 
@@ -140,6 +246,20 @@ def devig(pa: np.ndarray, pb: np.ndarray, how: str) -> np.ndarray:
     return np.clip(out, 1e-4, 1 - 1e-4)
 
 
+def devig_slope(p: np.ndarray, y: np.ndarray) -> float:
+    """How much sharpening the de-vigged price still needs to be calibrated.
+
+    Regress the outcome on the logit of the implied probability. A slope of 1
+    means the number means what it says; 1.34 means the method has flattened
+    the favourite — that the price it calls 92% wins 98% of the time — and a
+    model that "beats" such a number has beaten the de-vig, not the market.
+    """
+    from sklearn.linear_model import LogisticRegression
+    z = np.log(np.clip(p, 1e-6, 1 - 1e-6) / (1 - np.clip(p, 1e-6, 1 - 1e-6)))
+    return float(LogisticRegression(C=1e6, max_iter=1000)
+                 .fit(z.reshape(-1, 1), y).coef_[0][0])
+
+
 def bootstrap(d: np.ndarray, n: int = 4000, seed: int = 42) -> tuple[float, float]:
     rng = np.random.default_rng(seed)
     boot = np.array([rng.choice(d, len(d), replace=True).mean() for _ in range(n)])
@@ -156,13 +276,12 @@ def main() -> None:  # noqa: PLR0915
     calib = arg("--calib", "all")        # all | quoted | matched
     weight = arg("--weight", "none")     # none | quoted
     label = arg("--label", fset)
-    cols = SETS[fset]
+    cols = resolve(fset)
     # leave-one-group-out: the only honest way to say which group carries the
     # gain, because groups overlap in what they explain
     drop = arg("--drop", "")
     if drop:
-        gone = {"glicko": F.GLICKO, "record": F.RECORD, "sos2": F.SOS2,
-                "age": F.AGE, "level": F.LEVEL, "base": F.BASE}[drop]
+        gone = {c for g in drop.split("+") for c in GROUPS[g]}
         cols = [c for c in cols if c not in gone]
 
     df, feats = build(tag)
@@ -171,16 +290,37 @@ def main() -> None:  # noqa: PLR0915
           f"({j['dt'].min().date()} → {j['dt'].max().date()}) · "
           f"same-day {(j['gap'] == 0).mean():.0%}")
 
-    same = (j["na"] == j["na_o"]).values
-    ca = np.where(same, j["close_a"], j["close_b"]).astype(float)
-    cb = np.where(same, j["close_b"], j["close_a"]).astype(float)
-    p_mkt = devig(1 / ca, 1 / cb, arg("--devig", "proportional"))
+    same = ~j["swap"].to_numpy(bool)
+    which = arg("--price", "close")
+    ca = np.where(same, j[f"{which}_a"], j[f"{which}_b"]).astype(float)
+    cb = np.where(same, j[f"{which}_b"], j[f"{which}_a"]).astype(float)
+    oa = np.where(same, j["open_a"], j["open_b"]).astype(float)
+    ob = np.where(same, j["open_b"], j["open_a"]).astype(float)
+    kk = np.isfinite(ca) & np.isfinite(cb) & (ca > 1) & (cb > 1)
+    if not kk.all():
+        j, ca, cb, oa, ob = j[kk].reset_index(drop=True), ca[kk], cb[kk], oa[kk], ob[kk]
+        print(f"  {int((~kk).sum()):,} bouts dropped for a missing {which} price")
     y = (j["winner_id"].astype(str) == j["a"].astype(str)).astype(int).values
     idx = j["index"].values
 
     cutoff = pd.Series(j["dt"]).quantile(0.6)
     tr, te = (j["dt"] <= cutoff).values, (j["dt"] > cutoff).values
     print(f"  cutoff {cutoff.date()} · quoted train {tr.sum():,} · test {te.sum():,}")
+
+    # The de-vig is not a matter of taste and it is not the challenger's choice
+    # to make. Each method is a claim about where the bookmaker put his margin,
+    # and the TRAIN slice can say which claim is true: the one whose de-vigged
+    # price needs no further sharpening. Fitted before the test set is touched.
+    dv = arg("--devig", "auto")
+    cands = {m: devig(1 / ca, 1 / cb, m)
+             for m in ("proportional", "additive", "shin", "power")}
+    slopes = {m: devig_slope(v[tr], y[tr]) for m, v in cands.items()}
+    if dv == "auto":
+        dv = min(slopes, key=lambda m: abs(slopes[m] - 1.0))
+    print("  де-виг, наклон калибровки на train: "
+          + " · ".join(f"{m[:4]} {s:.3f}" + ("*" if m == dv else "")
+                       for m, s in slopes.items()))
+    p_mkt = cands[dv]
 
     y_all = F.label(df)
     pre = (df["dt"] <= cutoff).values
@@ -208,11 +348,25 @@ def main() -> None:  # noqa: PLR0915
     # watch all of it, and starving the model of 99% of its history is not a
     # fair test. Optionally lean the sample towards the population that
     # actually gets quoted.
+    prem_all = ((np.nan_to_num(feats["sched_rounds"].to_numpy(), nan=0) >= 8)
+                & (np.minimum(feats["n_a"].to_numpy(), feats["n_b"].to_numpy()) >= 8))
     if weight == "quoted":
-        s = feats["sched_rounds"].to_numpy()
-        n_min = np.minimum(feats["n_a"].to_numpy(), feats["n_b"].to_numpy())
-        w_all = np.where((np.nan_to_num(s, nan=0) >= 8) & (n_min >= 8), 3.0, 1.0)
-        w_big = w_big * w_all[big]
+        w_big = w_big * np.where(prem_all[big], 3.0, 1.0)
+    elif weight == "only":
+        # The model loses to the price by 0.045 on quoted bouts and by nothing
+        # like that on the corpus, because 90% of what it learned from is
+        # four-round club boxing that no book prices. This asks the other
+        # question: is the shift worth more than the 250,000 bouts it costs?
+        m = prem_all[big]
+        big, y_big, w_big = big[m], y_big[m], w_big[m]
+    # Half of the corpus is older than the sport the market prices today. A
+    # half-life says how fast a bout stops being evidence, instead of the
+    # implicit "never" that training on 1950 at full weight assumes.
+    hl = float(arg("--halflife", "0"))
+    if hl > 0:
+        yrs = ((np.datetime64(cutoff) - df["dt"].to_numpy("datetime64[D]")[big])
+               / np.timedelta64(365, "D"))
+        w_big = w_big * 0.5 ** (np.clip(yrs, 0, None) / hl)
     w = w_big
     cut = int(len(big) * 0.9)
     dtr = lgb.Dataset(X.iloc[big[:cut]], label=y_big[:cut], weight=w[:cut])
@@ -222,19 +376,64 @@ def main() -> None:  # noqa: PLR0915
               "learning_rate": float(arg("--lr", "0.03")),
               "num_leaves": int(arg("--leaves", "31")),
               "min_data_in_leaf": int(arg("--minleaf", "40")),
-              "feature_fraction": 0.9, "bagging_fraction": 0.9, "bagging_freq": 5,
+              "feature_fraction": float(arg("--ff", "0.9")),
+              "bagging_fraction": float(arg("--bf", "0.9")), "bagging_freq": 5,
               "lambda_l2": float(arg("--l2", "5.0")),
               "verbosity": -1, "seed": 42}
-    mdl = lgb.train(params, dtr, num_boost_round=4000, valid_sets=[dva],
-                    callbacks=[lgb.early_stopping(150, verbose=False)])
+    if "--mono" in sys.argv:
+        # A higher rating cannot make a man less likely to win. Trees do not
+        # know that and will happily carve a non-monotone step out of noise in
+        # a thin region; saying it out loud is free regularisation on exactly
+        # the features that carry the signal.
+        RATINGS = {"d_elo", "d_glicko", "d_glicko_cons", "d_bt2", "d_bt8",
+                   "d_elo_mov", "d_elo_slow"}
+        params["monotone_constraints"] = [1 if c in RATINGS else 0 for c in cols]
+    # Seed bagging: one tree ensemble is itself a sample, and averaging a few
+    # of them in logit space removes variance that early stopping cannot.
+    n_seed = int(arg("--seeds", "1"))
+    lgbs = []
+    for k in range(n_seed):
+        # not data_random_seed: that one is baked into the Dataset at
+        # construction and LightGBM refuses to see it change underneath
+        p = dict(params, seed=42 + k, bagging_seed=42 + k,
+                 feature_fraction_seed=42 + k)
+        lgbs.append(lgb.train(p, dtr, num_boost_round=4000, valid_sets=[dva],
+                              callbacks=[lgb.early_stopping(150, verbose=False)]))
+    # Fine-tuning: keep the 291k bouts that taught it what a boxer is, then
+    # carry on boosting at a low rate over the population the market prices.
+    # Cheaper than choosing between the two, and it can be measured.
+    ft = int(arg("--finetune", "0"))
+    if ft:
+        pm_tr = prem_all[big[:cut]]
+        pm_va = prem_all[big[cut:]]
+        tuned = []
+        for k, m in enumerate(lgbs):
+            # a fresh Dataset per seed: LightGBM bakes the seeds into the
+            # handle and refuses to see them change on the next continuation
+            ptr = lgb.Dataset(X.iloc[big[:cut][pm_tr]], label=y_big[:cut][pm_tr],
+                              weight=w[:cut][pm_tr])
+            pva = lgb.Dataset(X.iloc[big[cut:][pm_va]], label=y_big[cut:][pm_va],
+                              weight=w[cut:][pm_va], reference=ptr)
+            fp = dict(params, learning_rate=float(arg("--ftlr", "0.01")),
+                      seed=42 + k, bagging_seed=42 + k, feature_fraction_seed=42 + k)
+            tuned.append(lgb.train(fp, ptr, num_boost_round=ft, valid_sets=[pva],
+                                   init_model=m,
+                                   callbacks=[lgb.early_stopping(100, verbose=False)]))
+        print(f"  дообучение на {int(pm_tr.sum()):,} премиальных боях: "
+              + " ".join(f"{m.best_iteration}→{t.best_iteration}"
+                         for m, t in zip(lgbs, tuned)))
+        lgbs = tuned
+    mdl = lgbs[0]
     print(f"  trained on {len(big):,} bouts · {len(cols)} features · "
-          f"{mdl.best_iteration} trees")
+          f"{'+'.join(str(m.best_iteration) for m in lgbs)} trees"
+          + (f" · half-life {hl}y" if hl > 0 else ""))
 
     # An ensemble averaged in LOGIT space. Three models that are wrong in
     # different places: gradient boosting on leaves, gradient boosting on
     # ordered target statistics, and a plain linear model that cannot overfit
     # a rare interaction the way a tree can.
-    members = [("lgbm", lambda Z: mdl.predict(Z, num_iteration=mdl.best_iteration))]
+    members = [(f"lgbm{k}", (lambda m: lambda Z: m.predict(Z, num_iteration=m.best_iteration))(m))
+               for k, m in enumerate(lgbs)]
     if "--ensemble" in sys.argv:
         from catboost import CatBoostClassifier
         from sklearn.impute import SimpleImputer
@@ -265,21 +464,43 @@ def main() -> None:  # noqa: PLR0915
     # Calibration. Boosting on an imbalanced target is over-confident and
     # log-loss punishes that harder than being wrong; but a calibrator fitted on
     # the four-round regional tail is being asked about a population it never
-    # saw, so the population it is fitted on is a knob.
+    # saw, so both the population it is fitted on and its shape are knobs.
+    # `none` is one of them and is not a cop-out: an isotonic step function
+    # fitted on 29k club bouts made the quoted set WORSE by 0.003, which is a
+    # measurement, not a preference.
     if calib == "quoted":
         src_X, src_y = X.iloc[idx[tr]], y[tr]
     elif calib == "matched":
-        s = feats["sched_rounds"].to_numpy()[big[cut:]]
-        n_min = np.minimum(feats["n_a"].to_numpy(), feats["n_b"].to_numpy())[big[cut:]]
-        m = (np.nan_to_num(s, nan=0) >= 8) & (n_min >= 8)
+        m = prem_all[big[cut:]]
         src_X, src_y = X.iloc[big[cut:][m]], y_big[cut:][m]
     else:
         src_X, src_y = X.iloc[big[cut:]], y_big[cut:]
-    p_src = predict(src_X)
-    iso = IsotonicRegression(out_of_bounds="clip").fit(p_src, src_y)
+
+    def _ident(p):
+        return p
+
+    if calib == "none":
+        cal, n_src = _ident, 0
+    else:
+        p_src = np.clip(predict(src_X), 1e-6, 1 - 1e-6)
+        n_src = len(src_y)
+        if "--platt" in sys.argv:
+            # one slope and one intercept on the logit instead of a step
+            # function with 29k steps: it cannot chase a bump that is not there
+            from sklearn.linear_model import LogisticRegression as _LR
+            z = np.log(p_src / (1 - p_src)).reshape(-1, 1)
+            pl = _LR(C=1e6, max_iter=1000).fit(z, src_y)
+            def cal(p, pl=pl):
+                p = np.clip(p, 1e-6, 1 - 1e-6)
+                return pl.predict_proba(np.log(p / (1 - p)).reshape(-1, 1))[:, 1]
+        else:
+            iso = IsotonicRegression(out_of_bounds="clip").fit(p_src, src_y)
+            def cal(p, iso=iso):
+                return iso.predict(p)
     raw_te = predict(X.iloc[idx[te]])
-    p_mod = np.clip(iso.predict(raw_te), 1e-4, 1 - 1e-4)
-    print(f"  calibration on {calib} (n={len(src_y):,}): "
+    p_mod = np.clip(cal(raw_te), 1e-4, 1 - 1e-4)
+    print(f"  калибровка на {calib} (n={n_src:,}"
+          f"{', platt' if '--platt' in sys.argv else ''}): "
           f"{log_loss(y[te], np.clip(raw_te, 1e-6, 1-1e-6)):.4f} → {log_loss(y[te], p_mod):.4f}")
 
     # The quoted test set is ~400 bouts, so it cannot see a gain of 0.005 —
@@ -290,11 +511,20 @@ def main() -> None:  # noqa: PLR0915
     # the price".
     post = (~df["is_draw"]).values & (df["dt"] > cutoff).values
     pidx = np.where(post)[0]
-    p_corp = np.clip(iso.predict(predict(X.iloc[pidx])), 1e-4, 1 - 1e-4)
+    p_corp = np.clip(cal(predict(X.iloc[pidx])), 1e-4, 1 - 1e-4)
     y_corp = y_all[pidx]
     ll_corp = log_loss(y_corp, p_corp)
     print(f"  корпусный холдаут n={len(pidx):,}: log-loss {ll_corp:.4f} · "
           f"accuracy {accuracy_score(y_corp, p_corp > .5):.3f}")
+    # Third instrument. The corpus holdout has the power the quoted set lacks,
+    # but four fifths of it is four-round club boxing the market never prices,
+    # so a feature can win there and be irrelevant where it has to pay. This is
+    # the same holdout restricted to the population the odds feed actually
+    # quotes — scheduled 8 rounds or more, both men with 8 bouts behind them.
+    prem = prem_all[pidx]
+    ll_prem = log_loss(y_corp[prem], p_corp[prem])
+    print(f"  из них «премиальные» n={int(prem.sum()):,}: log-loss {ll_prem:.4f} · "
+          f"accuracy {accuracy_score(y_corp[prem], p_corp[prem] > .5):.3f}")
 
     pm, yy = p_mkt[te], y[te]
     ll_mod, ll_mkt = log_loss(yy, p_mod), log_loss(yy, np.clip(pm, 1e-6, 1 - 1e-6))
@@ -312,11 +542,13 @@ def main() -> None:  # noqa: PLR0915
               f"рынок {log_loss(yy[comp], np.clip(pm[comp], 1e-6, 1-1e-6)):.4f}")
 
     out = {"label": label, "tag": tag, "feats": fset, "calib": calib,
-           "devig": arg("--devig", "proportional"),
+           "devig": dv, "devig_slope": slopes[dv], "price": which,
            "weight": weight, "n_test": int(te.sum()), "n_train_quoted": int(tr.sum()),
            "ll_model": float(ll_mod), "ll_market": float(ll_mkt),
            "gap": float(d.mean()), "ci": [float(lo), float(hi)],
            "ll_corpus": float(ll_corp), "n_corpus_test": int(len(pidx)),
+           "ll_prem": float(ll_prem), "n_prem": int(prem.sum()),
+           "halflife": hl, "seeds": n_seed,
            "n_corpus": int(len(df)), "trees": int(mdl.best_iteration)}
 
     if "--blend" in sys.argv:
@@ -386,10 +618,12 @@ def main() -> None:  # noqa: PLR0915
     np.savez(preds / f"{label}.npz", p=p_mod, y=yy, p_mkt=pm,
              key=j.loc[te, "index"].to_numpy(),
              # raw decimal prices, vig included — log-loss is scored on the
-             # devigged probability, but a bet is settled at the real number
-             ca=ca[te], cb=cb[te],
+             # devigged probability, but a bet is settled at the real number.
+             # oa/ob are the OPEN, so a bet struck early can be marked to the
+             # close and the line movement scored as CLV.
+             ca=ca[te], cb=cb[te], oa=oa[te], ob=ob[te], price=which,
              p_blend=(p_bl if "--blend" in sys.argv else p_mod),
-             p_corp=p_corp, y_corp=y_corp, key_corp=pidx)
+             p_corp=p_corp, y_corp=y_corp, key_corp=pidx, prem_corp=prem)
 
 
 if __name__ == "__main__":

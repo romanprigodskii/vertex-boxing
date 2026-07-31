@@ -40,6 +40,15 @@ select e.date::date          as dt,
        b.a_bouts_before, b.b_bouts_before,
        b.a_wins_before, b.a_losses_before, b.a_draws_before,
        b.b_wins_before, b.b_losses_before, b.b_draws_before,
+       -- The scales, on 81% of the corpus and over 90% of recent years. These
+       -- were kept out of the model as "post-hoc data", which is right for a
+       -- forecast made a month out and wrong for the test we actually run: the
+       -- weigh-in is the day before, so the CLOSING line has already seen the
+       -- man who came in four pounds heavy. Fair against the close, NOT fair
+       -- against the open — the WEIGH group exists so the difference can be
+       -- reported rather than assumed.
+       b.a_weight_lbs::float8 as a_lbs,
+       b.b_weight_lbs::float8 as b_lbs,
        fa.dob                as a_dob,
        fb.dob                as b_dob,
        fa.height_cm          as a_height,
