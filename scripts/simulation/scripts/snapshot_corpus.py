@@ -68,6 +68,7 @@ select e.date::date          as dt,
        -- verdict he was outvoted into. Assigned by the commission before the
        -- bell and printed on the card, so fair against a closing line.
        b.referee_boxrec_id as ref_id,
+       b.boxrec_id        as bout_bxid,
        case when jsonb_typeof(b.judges) = 'array' then
          (select string_agg(j->>'boxrec_id', ',' order by o)
           from jsonb_array_elements(b.judges) with ordinality t(j, o)
@@ -105,6 +106,27 @@ def main() -> None:
     df = df[(df["dt"] >= "1950-01-01") & (df["dt"] <= pd.Timestamp.today())]
     for c in ("a", "b", "winner_id"):
         df[c] = df[c].astype(str)
+
+    # What the saved event pages carry and the ingest dropped — belts, position
+    # on the card, and each man's flag. Joined here rather than migrated into
+    # the database: it is a derived file, it is re-runnable, and a wrong parse
+    # costs a re-parse instead of a wrong column in `bout`. The flags matter
+    # most: fighter.country_code is empty on all 154,510 rows, so until now
+    # "home" was guessed from the share of a man's previous bouts held in this
+    # country, and the whole officials group sits on top of that guess.
+    ex = OUT / "event_extras.parquet"
+    if ex.exists():
+        e = pd.read_parquet(ex)[["boxrec_id", "bout_order", "card_n",
+                                 "a_country", "b_country", "title_level"]]
+        n0 = len(df)
+        df = df.merge(e.rename(columns={"boxrec_id": "bout_bxid",
+                                        "a_country": "a_ctry",
+                                        "b_country": "b_ctry"}),
+                      on="bout_bxid", how="left")
+        assert len(df) == n0, "the extras join duplicated rows"
+        hit = df["a_ctry"].notna().mean()
+        print(f"  event extras joined on {hit:.1%} of bouts · "
+              f"belt on {df['title_level'].notna().mean():.1%}")
     path = OUT / f"corpus_{tag}.parquet"
     df.reset_index(drop=True).to_parquet(path, index=False)
     day1 = (df["dt"].dt.day == 1).mean()

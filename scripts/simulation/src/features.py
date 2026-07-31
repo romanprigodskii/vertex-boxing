@@ -36,7 +36,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 5
+FEATS_VERSION = 6
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -60,7 +60,7 @@ PAIRED = [("a", "b"), ("a_name", "b_name"),
           ("a_lbs", "b_lbs"), ("a_score", "b_score"),
           # the judges' individual cards are per-corner too, and they are
           # comma-joined strings, so swapping the strings swaps the corners
-          ("judge_a", "judge_b")]
+          ("judge_a", "judge_b"), ("a_ctry", "b_ctry")]
 
 BASE = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b",
         "d_home", "d_promo_ties", "promo_bouts", "city_home_bias",
@@ -121,9 +121,19 @@ SCORE = ["d_melo", "d_dom", "d_dom_win", "d_dom_loss", "d_dom3",
 # assigned before the bell. ref_stop_res is the referee's rate net of what
 # bouts at that distance produce anyway — without it the feature is mostly a
 # label for the kind of card he works, which the model already knows.
-OFF = ["ref_stop", "ref_early", "ref_stop_res", "ref_n",
-       "ref_home", "d_home_ref",
-       "jud_home", "d_home_jud", "jud_fav", "d_elo_jud", "jud_n", "off_known"]
+REF = ["ref_stop", "ref_early", "ref_stop_res", "ref_n", "ref_home", "d_home_ref"]
+JUD = ["jud_home", "d_home_jud", "jud_fav", "d_elo_jud", "jud_n"]
+OFF = REF + JUD + ["off_known"]
+# What was on the saved event pages all along. Two of these fix things rather
+# than add them: the flags give the officials a REAL home fighter instead of
+# "the man with more previous bouts in this country", and the position on the
+# card is the promoter's own ranking of his show — BoxRec prints it main event
+# first, and the first sixth of a card carries 25.7% of the belts and averages
+# 8.3 scheduled rounds against 0.1% and 4.3 in the last sixth.
+CARD = ["d_home_true", "home_known", "title_lvl", "is_title", "card_pos", "is_main"]
+
+TITLE_RUNG = {"other": 1.0, "regional": 1.0, "national": 2.0,
+              "continental": 3.0, "international": 4.0, "world": 5.0}
 
 ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
@@ -134,6 +144,8 @@ EVERY_W = EVERY + WEIGH
 EVERY_S = EVERY_W + SCORE
 # …and the officials who worked the bout
 EVERY_O = EVERY_S + OFF
+# …and what the saved event pages carried
+EVERY_C = EVERY_O + CARD
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -411,6 +423,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     has_w = "a_lbs" in df.columns
     has_s = "a_score" in df.columns
     has_o = "ref_id" in df.columns
+    has_c = "a_ctry" in df.columns
 
     def _shrunk(k, n, prior):
         return (k + PSEUDO * prior) / (n + PSEUDO)
@@ -517,6 +530,38 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                    - (np.mean(dom3[b]) if dom3[b] else np.nan),
                    np.log1p(dom[a]["n"]), np.log1p(dom[b]["n"]))
 
+        # Who is actually the home fighter. The flags off the event page settle
+        # it outright on 99.9% of bouts; before them this was "whoever has
+        # boxed in this country more often", which is a guess about the man's
+        # itinerary rather than his passport — and every judge-bias feature was
+        # built on top of that guess.
+        d_home_true = np.nan
+        local = None
+        if has_c:
+            ac, bc = getattr(r, "a_ctry", None), getattr(r, "b_ctry", None)
+            cc = r.country.lower() if isinstance(r.country, str) else ""
+            if isinstance(ac, str) and isinstance(bc, str) and cc:
+                ah, bh = (ac.lower() == cc), (bc.lower() == cc)
+                d_home_true = float(ah) - float(bh)
+                if ah != bh:
+                    local = a if ah else b
+        if local is None and ha != hb:
+            local = a if ha > hb else b
+
+        crd = ()
+        if has_c:
+            bo = getattr(r, "bout_order", np.nan)
+            cn = getattr(r, "card_n", np.nan)
+            tl = getattr(r, "title_level", None)
+            pos = (float(bo) / max(float(cn) - 1.0, 1.0)) if (bo == bo and cn == cn) else np.nan
+            crd = (d_home_true,
+                   float(d_home_true == d_home_true),
+                   TITLE_RUNG.get(tl, 0.0) if isinstance(tl, str) else (
+                       0.0 if cn == cn else np.nan),
+                   float(isinstance(tl, str)) if cn == cn else np.nan,
+                   pos,
+                   float(bo == 0) if bo == bo else np.nan)
+
         off = ()
         if has_o:
             g_stop = glob[0] / glob[1] if glob[1] else 0.35
@@ -524,8 +569,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             R = ref[rid] if rid else None
             jids = getattr(r, "judge_ids", None)
             panel = [jud[k] for k in jids.split(",")] if isinstance(jids, str) and jids else []
-            # who is the more local man; nan when the venue tells us nothing
-            hh = (ha - hb) if (ha != hb) else np.nan
+            hh = d_home_true if d_home_true == d_home_true else (
+                (ha - hb) if (ha != hb) else np.nan)
             def _panel(key, hkey):
                 vals = [_shrunk(p[key], p[hkey], 0.5) for p in panel if p[hkey]]
                 return float(np.mean(vals)) if vals else np.nan
@@ -629,6 +674,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             *scr,
             # ---- OFF (absent unless the snapshot carries the officials)
             *off,
+            # ---- CARD (absent unless the event pages were re-parsed)
+            *crd,
         ))
 
         # ------------------------------------------------------------- update
@@ -739,7 +786,6 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 glob[0] / glob[1] if glob[1] else 0.35)
             base[0] += stopped; base[1] += 1
             glob[0] += stopped; glob[1] += 1
-            local = (a if ha > hb else b) if ha != hb else None
             if rid:
                 R = ref[rid]
                 R["n"] += 1
@@ -804,7 +850,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
 
     full = EVERY
     if has_w:
-        full = EVERY_O if has_o else (EVERY_S if has_s else EVERY_W)
+        full = EVERY_C if has_c else (EVERY_O if has_o else (EVERY_S if has_s else EVERY_W))
     out = pd.DataFrame(rows, columns=[c for c in full if c not in BT])
     for k, v in bt_ratings(df).items():
         out[k] = v

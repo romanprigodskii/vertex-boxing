@@ -32,7 +32,8 @@ _PAREN = re.compile(r"\[.*?\]|\(.*?\)")
 GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO,
           "age": F.AGE, "level": F.LEVEL, "h2h": F.H2H, "dur": F.DUR,
           "form": F.FORM, "level2": F.LEVEL2, "elo2": F.ELO2, "bt": F.BT,
-          "miss": F.MISS, "weigh": F.WEIGH, "score": F.SCORE, "off": F.OFF}
+          "miss": F.MISS, "weigh": F.WEIGH, "score": F.SCORE, "off": F.OFF,
+          "ref": F.REF, "jud": F.JUD, "card": F.CARD}
 
 SETS = {
     "base": F.BASE,
@@ -41,6 +42,7 @@ SETS = {
     "everyw": F.EVERY_W,  # …and with them — needs a snapshot that carries them
     "everys": F.EVERY_S,  # …and the judges' cards on top of that
     "everyo": F.EVERY_O,  # …and the officials who worked the bout
+    "everyc": F.EVERY_C,  # …and what the saved event pages carried
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
