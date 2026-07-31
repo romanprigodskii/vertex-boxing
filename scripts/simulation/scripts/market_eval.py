@@ -101,6 +101,45 @@ def join_odds(df: pd.DataFrame) -> pd.DataFrame:
     return j[~j["is_draw"]].reset_index(drop=True)
 
 
+def devig(pa: np.ndarray, pb: np.ndarray, how: str) -> np.ndarray:
+    """Turn two margin-loaded implied probabilities into A's fair probability.
+
+    The choice is NOT cosmetic. Proportional splits the margin in proportion to
+    the price, which is the most generous reading of a favourite's number;
+    power and Shin both assume the book loads more margin onto the longshot,
+    and both make the market look BETTER than proportional does (0.361-0.367
+    against 0.376 here). Anything claimed about beating the close has to
+    survive all of them.
+    """
+    s = pa + pb
+    if how == "proportional":
+        return pa / s
+    if how == "additive":
+        return np.clip(pa - (s - 1) / 2, 1e-4, 1 - 1e-4)
+    from scipy.optimize import brentq
+    out = np.empty_like(pa)
+    for i, (x, z) in enumerate(zip(pa, pb)):
+        if how == "power":
+            try:
+                k = brentq(lambda k: x ** k + z ** k - 1.0, 1.0, 400.0)
+            except ValueError:
+                k = 1.0
+            out[i] = x ** k
+        elif how == "shin":
+            tot = x + z
+            def f(t, x=x, z=z, tot=tot):
+                return sum((np.sqrt(t * t + 4 * (1 - t) * q * q / tot) - t) / (2 * (1 - t))
+                           for q in (x, z)) - 1
+            try:
+                t = brentq(f, 1e-9, 0.499)
+            except ValueError:
+                t = 1e-9
+            out[i] = (np.sqrt(t * t + 4 * (1 - t) * x * x / tot) - t) / (2 * (1 - t))
+        else:
+            raise SystemExit(f"unknown devig: {how}")
+    return np.clip(out, 1e-4, 1 - 1e-4)
+
+
 def bootstrap(d: np.ndarray, n: int = 4000, seed: int = 42) -> tuple[float, float]:
     rng = np.random.default_rng(seed)
     boot = np.array([rng.choice(d, len(d), replace=True).mean() for _ in range(n)])
@@ -135,7 +174,7 @@ def main() -> None:  # noqa: PLR0915
     same = (j["na"] == j["na_o"]).values
     ca = np.where(same, j["close_a"], j["close_b"]).astype(float)
     cb = np.where(same, j["close_b"], j["close_a"]).astype(float)
-    p_mkt = (1 / ca) / ((1 / ca) + (1 / cb))          # margin divided out
+    p_mkt = devig(1 / ca, 1 / cb, arg("--devig", "proportional"))
     y = (j["winner_id"].astype(str) == j["a"].astype(str)).astype(int).values
     idx = j["index"].values
 
@@ -273,6 +312,7 @@ def main() -> None:  # noqa: PLR0915
               f"рынок {log_loss(yy[comp], np.clip(pm[comp], 1e-6, 1-1e-6)):.4f}")
 
     out = {"label": label, "tag": tag, "feats": fset, "calib": calib,
+           "devig": arg("--devig", "proportional"),
            "weight": weight, "n_test": int(te.sum()), "n_train_quoted": int(tr.sum()),
            "ll_model": float(ll_mod), "ll_market": float(ll_mkt),
            "gap": float(d.mean()), "ci": [float(lo), float(hi)],
