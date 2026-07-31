@@ -31,7 +31,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 3
+FEATS_VERSION = 4
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -52,7 +52,7 @@ PAIRED = [("a", "b"), ("a_name", "b_name"),
           ("a_losses_before", "b_losses_before"),
           ("a_draws_before", "b_draws_before"),
           ("a_dob", "b_dob"), ("a_height", "b_height"), ("a_stance", "b_stance"),
-          ("a_lbs", "b_lbs")]
+          ("a_lbs", "b_lbs"), ("a_score", "b_score")]
 
 BASE = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b",
         "d_home", "d_promo_ties", "promo_bouts", "city_home_bias",
@@ -101,12 +101,19 @@ MISS = ["age_known"]
 # not against the opening one, which is why it is its own group: a run that
 # uses it may not be quoted as evidence that we could have bet early.
 WEIGH = ["d_lbs", "over_a", "over_b", "d_over", "d_lbs_hist", "lbs_known"]
+# How much a man wins by, not merely whether. Every rating in this file reads
+# one bit per bout — Elo, Glicko and Bradley-Terry all see a win as a win — and
+# the judges hand out a graded number on 144,337 of them for nothing.
+SCORE = ["d_melo", "d_dom", "d_dom_win", "d_dom_loss", "d_dom3",
+         "dom_n_a", "dom_n_b"]
 
 ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
+# …and the judges' cards
+EVERY_S = EVERY_W + SCORE
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -295,6 +302,38 @@ def _mean(d: dict):
     return (d["s"] / d["n"]) if d["n"] else np.nan
 
 
+def dominance(sa: float, a_sc, b_sc, method: str, rf, sched) -> float:
+    """How emphatically corner A won, in points per round. 1.0 is a shutout.
+
+    From the judges when there are judges: 19·(A−B)/(A+B) puts 120-108 and
+    40-36 both at exactly 1.0, because a shutout is a shutout whatever the
+    distance, and it needs no round count of its own — the totals carry it.
+    Sanity, measured on the corpus: unanimous decisions average 0.584 a round,
+    majority 0.142, split 0.064. That ordering is the whole point; a rating
+    that reads one bit per bout cannot see it.
+
+    A stoppage has no full card, so it is scored above a shutout and scaled by
+    how early it came: a first-round knockout of a twelve is 1.6, an eleventh-
+    round one 1.05. A disqualification says almost nothing about who was
+    better, so it is worth a fifth of a round.
+    """
+    if a_sc == a_sc and b_sc == b_sc and (a_sc + b_sc) > 0:
+        # clipped at two points a round: a shutout is one, and the corpus
+        # reaches ±7 only where a one-round technical decision leaves a card
+        # too small to divide by
+        return min(max(19.0 * (a_sc - b_sc) / (a_sc + b_sc), -2.0), 2.0)
+    if method in STOP:
+        share = 0.0
+        if rf == rf and sched == sched and sched > 0:
+            share = min(max((rf - 1) / sched, 0.0), 1.0)
+        m = 1.0 + 0.6 * (1.0 - share)
+        return m if sa >= 1.0 else (-m if sa <= 0.0 else 0.0)
+    if method in NO_VERDICT:
+        return 0.2 if sa >= 1.0 else (-0.2 if sa <= 0.0 else 0.0)
+    # a decision with no card kept: half a point a round, the median decision
+    return 0.5 if sa >= 1.0 else (-0.5 if sa <= 0.0 else 0.0)
+
+
 def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     """One chronological pass. Every row is scored on the state BEFORE it."""
     elo = defaultdict(lambda: ELO_INIT)
@@ -332,8 +371,17 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     opp_gl = defaultdict(lambda: {"s": 0.0, "n": 0})
     div_n = defaultdict(lambda: defaultdict(int))
     lbs_hist = defaultdict(lambda: {"s": 0.0, "n": 0})
+    # margin ratings: the rating IS the expected margin in points per round, so
+    # a difference of 0.4 says "this man should be four rounds up over ten"
+    mr = defaultdict(float)
+    dom = defaultdict(lambda: {"s": 0.0, "n": 0})
+    dom_w = defaultdict(lambda: {"s": 0.0, "n": 0})
+    dom_l = defaultdict(lambda: {"s": 0.0, "n": 0})
+    dom3 = defaultdict(lambda: deque(maxlen=3))
+    MELO_K = 0.10
     card = df.groupby("event_slug")["a"].transform("size").to_numpy()
     has_w = "a_lbs" in df.columns
+    has_s = "a_score" in df.columns
 
     _DEC = 3.0 * 365.25                              # half-life of "form", in days
 
@@ -427,6 +475,16 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 ob_ = wb_ - wlbs if not np.isnan(wlbs) else np.nan
                 wgt = (wa_ - wb_, oa_, ob_, oa_ - ob_, drift, 1.0)
 
+        scr = ()
+        if has_s:
+            scr = (mr[a] - mr[b],
+                   _mean(dom[a]) - _mean(dom[b]),
+                   _mean(dom_w[a]) - _mean(dom_w[b]),
+                   _mean(dom_l[a]) - _mean(dom_l[b]),
+                   (np.mean(dom3[a]) if dom3[a] else np.nan)
+                   - (np.mean(dom3[b]) if dom3[b] else np.nan),
+                   np.log1p(dom[a]["n"]), np.log1p(dom[b]["n"]))
+
         rows.append((
             # ---- BASE
             ea - eb, na - nb,
@@ -508,6 +566,8 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             float(both_dob),
             # ---- WEIGH (absent unless the snapshot carries the scales)
             *wgt,
+            # ---- SCORE (absent unless the snapshot carries the cards)
+            *scr,
         ))
 
         # ------------------------------------------------------------- update
@@ -610,6 +670,18 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 lbs_hist[a]["s"] += wa_; lbs_hist[a]["n"] += 1
             if not np.isnan(wb_):
                 lbs_hist[b]["s"] += wb_; lbs_hist[b]["n"] += 1
+        if has_s:
+            dm = dominance(sa, getattr(r, "a_score", np.nan),
+                           getattr(r, "b_score", np.nan), meth, rf, sched)
+            err = dm - (mr[a] - mr[b])
+            mr[a] += MELO_K * err / 2.0
+            mr[b] -= MELO_K * err / 2.0
+            for x, v in ((a, dm), (b, -dm)):
+                dom[x]["s"] += v; dom[x]["n"] += 1
+                dom3[x].append(v)
+                tgt = dom_w[x] if v > 0 else (dom_l[x] if v < 0 else None)
+                if tgt is not None:
+                    tgt["s"] += v; tgt["n"] += 1
 
         seen[a] += 1; seen[b] += 1
         wins[a] += sa >= 1.0; wins[b] += sa <= 0.0
@@ -633,7 +705,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             city_n[r.city] += 1
             city_home[r.city] += (sa >= 1.0) if ha >= hb else (sa <= 0.0)
 
-    full = EVERY_W if has_w else EVERY
+    full = (EVERY_S if has_s else EVERY_W) if has_w else EVERY
     out = pd.DataFrame(rows, columns=[c for c in full if c not in BT])
     for k, v in bt_ratings(df).items():
         out[k] = v

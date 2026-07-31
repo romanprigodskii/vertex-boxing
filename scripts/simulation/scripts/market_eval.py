@@ -32,13 +32,14 @@ _PAREN = re.compile(r"\[.*?\]|\(.*?\)")
 GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO,
           "age": F.AGE, "level": F.LEVEL, "h2h": F.H2H, "dur": F.DUR,
           "form": F.FORM, "level2": F.LEVEL2, "elo2": F.ELO2, "bt": F.BT,
-          "miss": F.MISS, "weigh": F.WEIGH}
+          "miss": F.MISS, "weigh": F.WEIGH, "score": F.SCORE}
 
 SETS = {
     "base": F.BASE,
     "all": F.ALL,       # the 2026-07-31 feature set, with the age leak fixed
     "every": F.EVERY,   # everything computable without the scales
     "everyw": F.EVERY_W,  # …and with them — needs a snapshot that carries them
+    "everys": F.EVERY_S,  # …and the judges' cards on top of that
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
@@ -461,6 +462,59 @@ def main() -> None:  # noqa: PLR0915
         lg = np.mean([np.log(p / (1 - p)) for p in ps], axis=0)
         return 1.0 / (1.0 + np.exp(-lg))
 
+    # An auxiliary model with an EARLIER cutoff. Its predictions on the window
+    # between the two cutoffs are the only genuinely out-of-sample predictions
+    # available before the test set — the main model has memorised everything up
+    # to its own cutoff, which is why a Platt fitted on the quoted train slice
+    # came out at 0.4230 against 0.4053 for no calibration at all. The blend
+    # needs the same thing for λ, so it is built once and used twice.
+    _aux: dict = {}
+
+    def aux_oos():
+        if _aux:
+            return _aux
+        c1 = cutoff - pd.DateOffset(years=int(arg("--auxback", "3")))
+        akeep = (~df["is_draw"]).values & (df["dt"] <= c1).values
+        abig = np.where(akeep)[0]
+        acut = int(len(abig) * 0.9)
+        aw = np.ones(len(abig))
+        if hl > 0:
+            ayrs = ((np.datetime64(c1) - df["dt"].to_numpy("datetime64[D]")[abig])
+                    / np.timedelta64(365, "D"))
+            aw = 0.5 ** (np.clip(ayrs, 0, None) / hl)
+        adtr = lgb.Dataset(X.iloc[abig[:acut]], label=y_all[abig[:acut]],
+                           weight=aw[:acut])
+        adva = lgb.Dataset(X.iloc[abig[acut:]], label=y_all[abig[acut:]],
+                           weight=aw[acut:], reference=adtr)
+        amdl = lgb.train(params, adtr, num_boost_round=4000, valid_sets=[adva],
+                         callbacks=[lgb.early_stopping(150, verbose=False)])
+        win = np.where((~df["is_draw"]).values
+                       & (df["dt"] > c1).values & (df["dt"] <= cutoff).values)[0]
+        p = np.clip(amdl.predict(X.iloc[win], num_iteration=amdl.best_iteration),
+                    1e-6, 1 - 1e-6)
+        _aux.update(c1=c1, model=amdl, idx=win, p=p, n_train=len(abig))
+        print(f"  вспомогательная модель до {c1.date()} ({len(abig):,} боёв), "
+              f"вне обучения на {len(win):,} боях после неё")
+        return _aux
+
+    def regime(rows):
+        """The uncertainty of the matchup, in the model's OWN terms.
+
+        The band table says the failure is a scale that is wrong in opposite
+        directions at the two ends: on the bouts the market calls 30-70% the
+        model scores 0.768 against a coin flip's 0.693, and on 95% favourites
+        it will not go past 0.90. One global slope cannot fix both. What it
+        needs is a slope that depends on how identifiable the matchup is — and
+        that has to be read off OUR features, never off the price, or the
+        closing line stops being eval-only.
+        """
+        rd = np.nan_to_num(feats["rd_a"].to_numpy()[rows]
+                           + feats["rd_b"].to_numpy()[rows], nan=700.0) / 100.0
+        nmin = np.log1p(np.minimum(feats["n_a"].to_numpy()[rows],
+                                   feats["n_b"].to_numpy()[rows]))
+        sch = np.nan_to_num(feats["sched_rounds"].to_numpy()[rows], nan=6.0) / 12.0
+        return np.column_stack([rd, nmin, sch])
+
     # Calibration. Boosting on an imbalanced target is over-confident and
     # log-loss punishes that harder than being wrong; but a calibrator fitted on
     # the four-round regional tail is being asked about a population it never
@@ -476,11 +530,37 @@ def main() -> None:  # noqa: PLR0915
     else:
         src_X, src_y = X.iloc[big[cut:]], y_big[cut:]
 
-    def _ident(p):
+    def _ident(p, rows=None):
         return p
 
     if calib == "none":
         cal, n_src = _ident, 0
+    elif calib in ("aux", "regime"):
+        # Fitted on the auxiliary model's out-of-sample window. `aux` is one
+        # slope and one intercept; `regime` lets both vary with how identifiable
+        # the matchup is, which is the only shape that can be shallow on a
+        # pick'em and steep on a mismatch at the same time.
+        from sklearn.linear_model import LogisticRegression as _LR
+        a = aux_oos()
+        n_src = len(a["idx"])
+        zs = np.log(a["p"] / (1 - a["p"]))
+
+        def design(z, rows):
+            if calib == "aux":
+                return z.reshape(-1, 1)
+            u = regime(rows)
+            return np.column_stack([z, u, z[:, None] * u])
+
+        lr = _LR(C=1.0, max_iter=2000).fit(design(zs, a["idx"]), y_all[a["idx"]])
+        if calib == "regime":
+            names = ["z", "rd", "log n", "sched", "z×rd", "z×log n", "z×sched"]
+            print("  наклон по режиму: "
+                  + " · ".join(f"{n} {c:+.3f}" for n, c in zip(names, lr.coef_[0])))
+
+        def cal(p, rows=None, lr=lr, design=design):
+            p = np.clip(p, 1e-6, 1 - 1e-6)
+            z = np.log(p / (1 - p))
+            return lr.predict_proba(design(z, rows))[:, 1]
     else:
         p_src = np.clip(predict(src_X), 1e-6, 1 - 1e-6)
         n_src = len(src_y)
@@ -490,15 +570,15 @@ def main() -> None:  # noqa: PLR0915
             from sklearn.linear_model import LogisticRegression as _LR
             z = np.log(p_src / (1 - p_src)).reshape(-1, 1)
             pl = _LR(C=1e6, max_iter=1000).fit(z, src_y)
-            def cal(p, pl=pl):
+            def cal(p, rows=None, pl=pl):
                 p = np.clip(p, 1e-6, 1 - 1e-6)
                 return pl.predict_proba(np.log(p / (1 - p)).reshape(-1, 1))[:, 1]
         else:
             iso = IsotonicRegression(out_of_bounds="clip").fit(p_src, src_y)
-            def cal(p, iso=iso):
+            def cal(p, rows=None, iso=iso):
                 return iso.predict(p)
     raw_te = predict(X.iloc[idx[te]])
-    p_mod = np.clip(cal(raw_te), 1e-4, 1 - 1e-4)
+    p_mod = np.clip(cal(raw_te, idx[te]), 1e-4, 1 - 1e-4)
     print(f"  калибровка на {calib} (n={n_src:,}"
           f"{', platt' if '--platt' in sys.argv else ''}): "
           f"{log_loss(y[te], np.clip(raw_te, 1e-6, 1-1e-6)):.4f} → {log_loss(y[te], p_mod):.4f}")
@@ -511,7 +591,7 @@ def main() -> None:  # noqa: PLR0915
     # the price".
     post = (~df["is_draw"]).values & (df["dt"] > cutoff).values
     pidx = np.where(post)[0]
-    p_corp = np.clip(cal(predict(X.iloc[pidx])), 1e-4, 1 - 1e-4)
+    p_corp = np.clip(cal(predict(X.iloc[pidx]), pidx), 1e-4, 1 - 1e-4)
     y_corp = y_all[pidx]
     ll_corp = log_loss(y_corp, p_corp)
     print(f"  корпусный холдаут n={len(pidx):,}: log-loss {ll_corp:.4f} · "
@@ -560,24 +640,17 @@ def main() -> None:  # noqa: PLR0915
         # are in-sample and λ comes out at 0.85 purely because the model
         # remembers them. Fit λ against an AUXILIARY model trained on an
         # earlier cutoff, for which the same bouts are genuinely unseen.
-        c1 = pd.Series(j["dt"]).quantile(0.35)
-        akeep = (~df["is_draw"]).values & (df["dt"] <= c1).values
-        abig = np.where(akeep)[0]
-        acut = int(len(abig) * 0.9)
-        adtr = lgb.Dataset(X.iloc[abig[:acut]], label=y_all[abig[:acut]])
-        adva = lgb.Dataset(X.iloc[abig[acut:]], label=y_all[abig[acut:]], reference=adtr)
-        amdl = lgb.train(params, adtr, num_boost_round=4000, valid_sets=[adva],
-                         callbacks=[lgb.early_stopping(150, verbose=False)])
-        aiso = IsotonicRegression(out_of_bounds="clip").fit(
-            amdl.predict(X.iloc[abig[acut:]], num_iteration=amdl.best_iteration),
-            y_all[abig[acut:]])
+        a = aux_oos()                 # one auxiliary model, used twice
+        c1, amdl = a["c1"], a["model"]
         mid = ((j["dt"] > c1) & (j["dt"] <= cutoff)).values
         print(f"\n  λ подбирается на {mid.sum():,} боях после {c1.date()}, "
-              f"вне обучения вспомогательной модели ({len(abig):,} боёв)")
+              f"вне обучения вспомогательной модели ({a['n_train']:,} боёв)")
         tr = mid                      # the fitting slice for the blend
-        p_tr = np.clip(aiso.predict(amdl.predict(X.iloc[idx[tr]],
-                                                 num_iteration=amdl.best_iteration)),
-                       1e-4, 1 - 1e-4)
+        # calibrated the same way the main model is, so λ mixes two logits on
+        # one scale instead of also absorbing a scale difference
+        p_tr = np.clip(cal(amdl.predict(X.iloc[idx[tr]],
+                                        num_iteration=amdl.best_iteration),
+                           idx[tr]), 1e-4, 1 - 1e-4)
         def lg(p): return np.log(p / (1 - p))
         # ONE parameter, not two. A free two-weight logistic on 2,500 bouts
         # fits the scale of each logit as well as the mix and comes out with
@@ -593,6 +666,35 @@ def main() -> None:  # noqa: PLR0915
         cm, ck = lam, 1 - lam
         p_bl = np.clip(1 / (1 + np.exp(-(lam * lte_m + (1 - lam) * lte_k))),
                        1e-6, 1 - 1e-6)
+
+        if "--fade" in sys.argv:
+            # A constant λ says "trust the model this much, always". The test
+            # set says otherwise: the model is calibrated overall (slope 0.94)
+            # and falls apart exactly where the price disagrees with it — on the
+            # bouts the market calls even, its 0.82 predictions land at 0.535,
+            # a slope of 0.24. So let the weight FADE as the disagreement grows:
+            # λ(d) = λ0 / (1 + c·|z_model − z_market|). Two parameters instead of
+            # one, fitted on the same out-of-sample window, and c = 0 recovers
+            # the constant blend exactly — so it cannot do worse by construction
+            # on the fitting slice, only on the test set, which is the point.
+            dtr_, dte_ = np.abs(ltr_m - ltr_k), np.abs(lte_m - lte_k)
+            best = (1e9, lam, 0.0)
+            for g in np.linspace(0, 1, 51):
+                for c in np.concatenate([[0.0], np.geomspace(0.01, 3.0, 40)]):
+                    w = g / (1 + c * dtr_)
+                    q = 1 / (1 + np.exp(-(w * ltr_m + (1 - w) * ltr_k)))
+                    L = log_loss(y[tr], q)
+                    if L < best[0]:
+                        best = (L, float(g), float(c))
+            _, g0, c0 = best
+            w_te = g0 / (1 + c0 * dte_)
+            p_bl = np.clip(1 / (1 + np.exp(-(w_te * lte_m + (1 - w_te) * lte_k))),
+                           1e-6, 1 - 1e-6)
+            cm, ck = float(np.mean(w_te)), float(1 - np.mean(w_te))
+            print(f"\n  ЗАТУХАЮЩИЙ БЛЕНД  λ0 {g0:.2f} · c {c0:.3f} · "
+                  f"средняя λ на тесте {cm:.3f} "
+                  f"(при полном согласии {g0:.2f}, при |Δlogit|=2 "
+                  f"{g0 / (1 + c0 * 2):.3f})")
         ll_bl = log_loss(yy, p_bl)
         db = (-np.log(np.clip(np.where(yy == 1, pm, 1 - pm), 1e-9, 1))
               - -np.log(np.clip(np.where(yy == 1, p_bl, 1 - p_bl), 1e-9, 1)))

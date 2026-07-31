@@ -49,6 +49,17 @@ select e.date::date          as dt,
        -- reported rather than assumed.
        b.a_weight_lbs::float8 as a_lbs,
        b.b_weight_lbs::float8 as b_lbs,
+       -- The judges' totals, on 144,337 bouts. To Elo a win is a win, so
+       -- 120-108 and 115-113 are the same evidence; they are not. The cards say
+       -- by HOW MUCH, which is the one graded observation this sport hands out
+       -- for free. Post-fight, so they may only ever update a rating for the
+       -- NEXT bout — never appear as a feature of the bout they came from.
+       case when jsonb_typeof(b.judges) = 'array' then
+         (select avg((j->>'a')::numeric)::float8 from jsonb_array_elements(b.judges) j
+          where j ? 'a') end as a_score,
+       case when jsonb_typeof(b.judges) = 'array' then
+         (select avg((j->>'b')::numeric)::float8 from jsonb_array_elements(b.judges) j
+          where j ? 'b') end as b_score,
        fa.dob                as a_dob,
        fb.dob                as b_dob,
        fa.height_cm          as a_height,
