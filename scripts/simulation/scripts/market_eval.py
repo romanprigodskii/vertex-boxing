@@ -4,9 +4,16 @@ Everything else is a knob on this. Feature sets, calibration population,
 training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
-  ./venv/bin/python scripts/market_eval.py --tag post-ingest --feats all
-  ./venv/bin/python scripts/market_eval.py --tag post-ingest --feats base --label baseline
-  ./venv/bin/python scripts/market_eval.py --tag post-ingest --calib quoted --weight quoted --blend
+The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: corpus 0.3432 /
+premium 0.2967 / -0.0398 against the close, measured 2026-08-01. Every one of
+them was a measurement — no calibration because isotonic on 29k club bouts cost
+0.003 on the quoted set, a six-year half-life and five seeds because each is
+worth about +0.0013, 63 leaves because a 500-trial search could not beat it.
+Run it bare to reproduce the headline; pass flags to ask a different question.
+
+  ./venv/bin/python scripts/market_eval.py --blend
+  ./venv/bin/python scripts/market_eval.py --feats everyc --drop ref --label no-ref
+  ./venv/bin/python scripts/market_eval.py --price open --blend --label open
 """
 
 from __future__ import annotations
@@ -275,9 +282,9 @@ def main() -> None:  # noqa: PLR0915
     from sklearn.isotonic import IsotonicRegression
     from sklearn.metrics import accuracy_score, log_loss
 
-    tag = arg("--tag", "post-ingest")
-    fset = arg("--feats", "all")
-    calib = arg("--calib", "all")        # all | quoted | matched
+    tag = arg("--tag", "card")
+    fset = arg("--feats", "everyc")
+    calib = arg("--calib", "none")       # none | all | matched | aux | regime | quoted
     weight = arg("--weight", "none")     # none | quoted
     label = arg("--label", fset)
     cols = resolve(fset)
@@ -366,7 +373,7 @@ def main() -> None:  # noqa: PLR0915
     # Half of the corpus is older than the sport the market prices today. A
     # half-life says how fast a bout stops being evidence, instead of the
     # implicit "never" that training on 1950 at full weight assumes.
-    hl = float(arg("--halflife", "0"))
+    hl = float(arg("--halflife", "6"))
     if hl > 0:
         yrs = ((np.datetime64(cutoff) - df["dt"].to_numpy("datetime64[D]")[big])
                / np.timedelta64(365, "D"))
@@ -378,8 +385,8 @@ def main() -> None:  # noqa: PLR0915
                       reference=dtr)
     params = {"objective": "binary", "metric": "binary_logloss",
               "learning_rate": float(arg("--lr", "0.03")),
-              "num_leaves": int(arg("--leaves", "31")),
-              "min_data_in_leaf": int(arg("--minleaf", "40")),
+              "num_leaves": int(arg("--leaves", "63")),
+              "min_data_in_leaf": int(arg("--minleaf", "100")),
               "feature_fraction": float(arg("--ff", "0.9")),
               "bagging_fraction": float(arg("--bf", "0.9")), "bagging_freq": 5,
               "lambda_l2": float(arg("--l2", "5.0")),
@@ -394,7 +401,7 @@ def main() -> None:  # noqa: PLR0915
         params["monotone_constraints"] = [1 if c in RATINGS else 0 for c in cols]
     # Seed bagging: one tree ensemble is itself a sample, and averaging a few
     # of them in logit space removes variance that early stopping cannot.
-    n_seed = int(arg("--seeds", "1"))
+    n_seed = int(arg("--seeds", "5"))
     lgbs = []
     for k in range(n_seed):
         # not data_random_seed: that one is baked into the Dataset at
