@@ -28,6 +28,25 @@ confirmation half and +0.0014 on the premium holdout, five seeds, and it is not
 a flag on the scoreboard: retraining is a property of a deployment, not of a
 measurement. `lab.py --exp walk-tta` has it.
 
+**It stacks with the mirror almost exactly.** On top of mirror training it is
+worth +0.0023 on the confirmation half [+0.0015, +0.0030] and +0.0014 on the
+premium holdout [+0.0002, +0.0026] — against +0.0024 and +0.0014 on top of plain
+`--tta`. The two contributions are independent, which is what the mechanisms
+predict: the mirror removes an asymmetry between the corners, walk-forward
+removes staleness, and neither touches the other. The full stack, measured on
+the bench (`lab.py --exp mirror-walk`, three seeds):
+
+| instrument | full stack | scoreboard (`--tta --mirror`) | where it started |
+|---|---|---|---|
+| corpus holdout | **0.3310** | 0.3325 | 0.3390 |
+| premium holdout | **0.2833** | 0.2845 | 0.2901 |
+| quoted vs the close | **0.3719** | 0.3725 | 0.3799 |
+| gap to the close | **−0.0250** | −0.0255 | −0.0329 |
+
+Three seeds reproduce five here to a thousandth — mirror training scored 0.3325
+corpus and 0.3279 confirmation on both — so the cheaper protocol was not a
+compromise on this question.
+
 ### What the second pass changed, in order of size
 1. **87 new features** (`everyx`, 200 columns), +0.0025 on the confirmation half
    [+0.0017,+0.0033]. Not one of the six groups is worth anything alone; the

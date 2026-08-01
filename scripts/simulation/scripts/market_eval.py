@@ -62,7 +62,10 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           "miss": F.MISS, "weigh": F.WEIGH, "score": F.SCORE, "off": F.OFF,
           "ref": F.REF, "jud": F.JUD, "card": F.CARD,
           "lvlr": F.LVLR, "lvlq": F.LVLQ, "unc": F.UNC, "res": F.RES,
-          "ctx": F.CTX, "cmp": F.CMP, "thin": F.THIN, "amat": F.AMAT, "amat1": ["d_am"], "extra": F.EXTRA}
+          "ctx": F.CTX, "cmp": F.CMP, "thin": F.THIN, "amat": F.AMAT,
+          # the amateur group's single strongest column, kept so the negative
+          # result can be reproduced one feature at a time
+          "amat1": ["d_am"], "extra": F.EXTRA}
 
 SETS = {
     "base": F.BASE,
