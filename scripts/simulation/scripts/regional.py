@@ -67,14 +67,15 @@ def clv_roi(p, y, oa, ob, ca, cb):
     bb = (eb > EDGE) & (eb > ea) & ok
     sel = ba | bb
     if sel.sum() < 12:
-        return 0, np.nan, (np.nan, np.nan), np.nan
+        return 0, np.nan, (np.nan, np.nan), np.nan, (np.nan, np.nan)
     fo_a, fo_b = fair(oa[sel], ob[sel])
     fc_a, fc_b = fair(ca[sel], cb[sel])
     moved = np.where(ba[sel], fc_a - fo_a, fc_b - fo_b)
     took = np.where(ba[sel], oa[sel], ob[sel])
     won = np.where(ba[sel], y[sel] == 1, y[sel] == 0)
     pnl = np.where(won, took - 1.0, -1.0)
-    return int(sel.sum()), float(moved.mean()), boot(moved), float(pnl.mean())
+    return (int(sel.sum()), float(moved.mean()), boot(moved),
+            float(pnl.mean()), boot(pnl))
 
 
 def main() -> None:
@@ -102,7 +103,7 @@ def main() -> None:
     for name, m in bands:
         if m.sum() < 25:
             continue
-        n, c, (lo, hi), roi = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
+        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
         ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
         print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
               f"{ll(pm[m], y[m]).mean():8.4f} "
@@ -122,7 +123,7 @@ def main() -> None:
         m = m & np.isfinite(nt)
         if m.sum() < 25:
             continue
-        n, c, (lo, hi), roi = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
+        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
         ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
         print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
               f"{ll(pm[m], y[m]).mean():8.4f} "
@@ -144,12 +145,28 @@ def main() -> None:
         m = np.asarray(m) & np.isfinite(cs)
         if m.sum() < 25:
             continue
-        n, c, (lo, hi), roi = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
+        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
         ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
         print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
               f"{ll(pm[m], y[m]).mean():8.4f} "
               f"{ll(p[m], y[m]).mean() - ll(pm[m], y[m]).mean():+8.4f} "
               f"{n:7d} {c:+8.4f} {ci:>18s} {roi:+7.1%}")
+
+    # What the finding prescribes, end to end: stop betting the bottom of the
+    # card. Not a new model — the same predictions, filtered by a level rule
+    # that is knowable before the bell and has nothing to do with the price.
+    print("\n=== стратегия, которую предписывает находка ===")
+    top = (np.nan_to_num(sched, nan=0) >= 10) | (np.nan_to_num(tl, nan=0) >= 1)
+    for name, m in (("ВСЕ котируемые бои", np.ones(len(y), bool)),
+                    ("только 10+ раундов или пояс", top),
+                    ("только 12 раундов или конт./мировой пояс",
+                     (np.nan_to_num(sched, nan=0) >= 12) | (np.nan_to_num(tl, nan=0) >= 3))):
+        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
+        mark = "  ЗНАЧИМО" if rlo > 0 else ""
+        print(f"  {name:42s} боёв {m.sum():5d} · ставок {n:5d} · "
+              f"CLV {c:+.4f} [{lo:+.4f},{hi:+.4f}] · "
+              f"ROI {roi:+.1%} [{rlo:+.1%},{rhi:+.1%}]{mark}")
+    print("  CLV — надёжная колонка; ROI на паре сотен ставок сам по себе ничего не значит.")
 
     print("\nЧитать так: тезис верен, если при движении ВНИЗ по уровню разрыв к "
           "закрытию\nсжимается, а CLV растёт. Если наоборот — тезис перевёрнут.")

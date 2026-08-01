@@ -444,6 +444,31 @@ card the market knows which of these two is a prospect being moved and we are
 reading two thin records. It is the thin-record finding again — 19.7% of the gap
 on 6% of the bouts — seen from the level axis instead of the record axis.
 
+### What the finding prescribes
+
+Same model, same predictions, same 2% threshold on the opening price — only a
+filter on the level of the bout, which is knowable before the bell and has
+nothing to do with the price.
+
+| filter | bouts | bets | CLV | ROI |
+|---|---|---|---|---|
+| all quoted | 3,288 | 2,037 | +0.0109 [+0.0088,+0.0130] | +2.7% [−3.1%,+8.7%] |
+| 10+ rounds or any belt | 2,033 | 1,378 | +0.0128 [+0.0100,+0.0157] | +6.2% [−1.1%,+13.7%] |
+| 12 rounds or a continental/world belt | 1,134 | 798 | **+0.0148** [+0.0111,+0.0188] | **+11.3% [+1.8%,+21.2%]** |
+
+Both columns rise monotonically as the filter tightens, and the last row is the
+first flat-staked ROI interval on this model to exclude zero.
+
+**Read the selection caveat before believing the last cell.** The cut-points
+were chosen after looking at the level table, so the +11.3% is a post-hoc
+number and its interval understates the real uncertainty. What is NOT post-hoc:
+the direction was agreed by three proxies measuring different things before any
+cut was picked, CLV is monotone across every band rather than only at the chosen
+one, and the filter is a coarsening of an existing pre-bell feature rather than
+a parameter fitted to the outcome. The honest status is "a strong hypothesis
+with a mechanism", and the thing that would settle it is out-of-sample
+confirmation — which is what forward capture is for.
+
 **What this does and does not license.** It does not prove the unpriced regional
 tail is efficient, and cannot: a four-rounder that gets a line at all is not the
 anonymous tail, it is a prospect showcase on a televised undercard, which is the
