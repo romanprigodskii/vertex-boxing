@@ -83,10 +83,7 @@ number also improved at every threshold — −6.30% → −3.25% at a 2% edge,
 zero on this sample.
 
 Measure CLV in PROBABILITY. The price-space null — bet a random side at the open,
-mark to the close — is +3.30%, which is the two margins and nothing else.
-
-Measure CLV in PROBABILITY. The price-space null — bet a random side at the open,
-mark to the close — is +3.5% reading the close as the worst price and −4.9%
+mark to the close — is +3.30% reading the close as the worst price and −4.9%
 reading it as the best. That is the two margins and nothing else. And never
 compute CLV for the blend against any closing price: it takes one as its input
 and beats it by construction. That guard has failed twice here, first by being
@@ -187,19 +184,59 @@ What there is instead, from `where.py`:
   bouts where our |logit| is under 0.5, the market scores 0.5986 to our 0.6889 —
   31% of the gap.
 
+### Amateur pedigree: pulled, matched, measured, and it does not work
+This was the top of the "what next" list and it is now a dead end, which is
+worth more written down than guessed at.
+
+BoxRec was the obvious source and is the wrong one: zero of 501 saved
+professional profile pages contain the word "amateur", the amateur records live
+in a separate id space with no link from the pro page, and reaching them means
+logged-in search at roughly 150 pages a day. Wikidata has the same men for free
+(`13_wikidata_amateur.py`): 6,733 dated appearances at the Olympics and the
+major games, of which 6,090 matched 4,804 of our fighters by the BoxRec
+crosswalk and the Wikidata id (`14_ingest_amateur.py`). Only appearances DATED
+BEFORE a bout are ever visible to it, so a 2012 fight cannot know about a 2016
+medal.
+
+The raw signal is strong. On the quoted test set, when exactly one of the two
+men has an amateur international behind him he wins **73.4% of 458 bouts**, and
+**82.3% of 141** when he medalled.
+
+None of it is incremental, and adding it makes the model worse:
+
+| premium holdout | log-loss |
+|---|---|
+| without the group (200 features) | **0.2874** |
+| plus its single strongest column | 0.2880 |
+| plus all six (206 features) | 0.2889 |
+
+Monotone in how much of it you add, and the six-feature version costs +0.0014
+[+0.0004, +0.0025] on three seeds. The damage is concentrated exactly where the
+features fire — +0.0106 on the quoted bouts with a pedigree, +0.0168 on the
+premium ones — which names the mechanism: the group is non-zero on 1.2% of
+training rows and on 14.7% of the quoted test set, so the model learns the
+effect from club boxing where an Olympian is a rarity and then applies it to a
+population where they are common. The ratings, the records and the level
+features already carry everything it knows.
+
+It stays computed and out of the default set: `--feats everyx+amat` reproduces
+the negative.
+
 ### What would move the needle next
-1. **Amateur pedigree.** It is the largest addressable block on the board: a
-   fifth of the deficit sits on debutants and near-debutants, and BoxRec carries
-   an amateur tab while Wikidata carries Olympic medals. This is a crawl, not a
-   feature.
-2. **Walk-forward in production.** +0.0019 on the second half of the holdout for
+Amateur pedigree was item one on this list and has been struck off above, which
+leaves the thin-record slice still open and no cheap source for it: what the
+market knows about a debutant is not that he was an Olympian — we now have that
+and it does not help — but what his camp, his gym and his last sparring looked
+like, and none of that is in any database.
+
+1. **Walk-forward in production.** +0.0019 on the second half of the holdout for
    nothing but a cron entry, and it grows with the age of the model.
-3. **The yardstick.** proboxingodds.com's front page is a LIVE ten-book board
+2. **The yardstick.** proboxingodds.com's front page is a LIVE ten-book board
    including Polymarket and Kalshi — near-zero-margin prediction markets, a far
    sharper benchmark than any historical close — and it exists only going
    forward: nothing about it can be recovered after the fact. Forward capture is
    at zero of five parts.
-4. Not hyper-parameters. Re-checked on the real protocol: 63→31→127→255 leaves,
+3. Not hyper-parameters. Re-checked on the real protocol: 63→31→127→255 leaves,
    lr 0.03→0.015, min_data 30→300, λ₂ 5→30, feature fraction 0.9→0.6 — the best
    of them is worth +0.0006 on the confirmation half and none has an interval
    clear of zero. And not the quoted-population reweighting (−0.0019), nor

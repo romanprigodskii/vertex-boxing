@@ -36,7 +36,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 9
+FEATS_VERSION = 10
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -189,6 +189,19 @@ CMP = ["same_ctry", "venue_cos", "d_ko_loss_days", "koloss_min", "koloss_max",
 THIN = ["wrtrue_seen_min", "wrtrue_seen_max", "ntrue_seen_min", "ntrue_seen_max",
         "hidden_seen_min", "hidden_seen_max",
         "sched_thin", "opplvl_thin", "promo_thin", "card_thin"]
+# AMATEUR PEDIGREE, from Wikidata (see scripts/scraper/scripts/13_wikidata_amateur.py).
+# The corpus starts at a man's professional debut, so the first thing anyone
+# knows about a prospect — that he boxed for his country — is invisible to every
+# other feature here. On the quoted test set, when exactly one of the two has an
+# amateur international behind him he wins 73.4% of 458 bouts, and 82.3% of 141
+# when he medalled.
+#
+# Only appearances DATED BEFORE THE BOUT are ever visible: a 2012 fight must not
+# know about a 2016 medal. And "no pedigree" is 0, not NaN, on purpose — the
+# Olympic rosters Wikidata imports are exhaustive, so the absence of an
+# appearance is a fact about the man rather than a hole in our crawl, and a
+# score of 0 names no corner.
+AMAT = ["d_am", "am_min", "am_max", "am_years", "am_n_min", "am_n_max"]
 # the three of the above that are fitted in bt_ratings, not in the replay loop
 BTX = ["bt8_min", "bt8_max", "d_bt_z"]
 
@@ -199,7 +212,7 @@ ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
 # the 2026-08-01 groups, always computable — they need no extra columns
-EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN
+EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
@@ -208,8 +221,11 @@ EVERY_S = EVERY_W + SCORE
 EVERY_O = EVERY_S + OFF
 # …and what the saved event pages carried
 EVERY_C = EVERY_O + CARD
-# …and the levels, the uncertainty terms, the residuals and the context rates
-EVERY_X = EVERY_C + EXTRA
+# …and the levels, the uncertainty terms, the residuals and the context rates.
+# AMAT is computed (it is in EXTRA, so it is in the matrix) but deliberately NOT
+# in the default set: it was measured and it costs 0.0015 on the premium
+# holdout. `--feats everyx+amat` reproduces the negative result.
+EVERY_X = EVERY_C + LVLR + LVLQ + UNC + RES + CTX + CMP + THIN
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -473,6 +489,25 @@ def dominance(sa: float, a_sc, b_sc, method: str, rf, sched) -> float:
     return 0.5 if sa >= 1.0 else (-0.5 if sa <= 0.0 else 0.0)
 
 
+def amateur_index() -> dict[str, list[tuple]]:
+    """fighter id -> [(date, pedigree score), ...] sorted by date.
+
+    Score is 1 for taking part and 2/3/4 for bronze/silver/gold, so a single
+    number orders "nobody", "went", and "medalled". Missing file means the
+    group is all zeros rather than an error: the replay must still run on a
+    machine that has not pulled Wikidata."""
+    p = STAGING / "fighter_amateur.parquet"
+    if not p.exists():
+        return {}
+    am = pd.read_parquet(p)
+    am = am.sort_values("event_date")
+    out: dict[str, list[tuple]] = defaultdict(list)
+    for t in am.itertuples(index=False):
+        out[str(t.fighter_id)].append((pd.Timestamp(t.event_date),
+                                       1.0 + float(t.medal)))
+    return dict(out)
+
+
 def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     """One chronological pass. Every row is scored on the state BEFORE it."""
     elo = defaultdict(lambda: ELO_INIT)
@@ -542,6 +577,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     # against the population that was actually active rather than against 1500
     pop = deque(maxlen=20000)
     pop_stat = [1500.0, 100.0]                   # μ and σ, refreshed periodically
+    amat = amateur_index()
     card = df.groupby("event_slug")["a"].transform("size").to_numpy()
     has_w = "a_lbs" in df.columns
     has_s = "a_score" in df.columns
@@ -830,6 +866,21 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         promo_thin = (float(promo_n[r.promoter]) if (thin and r.promoter) else np.nan)
         card_thin = float(card[i]) if thin else np.nan
 
+        # ---- AMAT: only what was already on the record before this bell
+        def _ped(f):
+            hist = amat.get(f)
+            if not hist:
+                return 0.0, 0.0, np.nan
+            seen = [(d, v) for d, v in hist if d < r.dt]
+            if not seen:
+                return 0.0, 0.0, np.nan
+            return (max(v for _, v in seen), float(len(seen)),
+                    (r.dt - seen[-1][0]).days / 365.25)
+        am_a, amn_a, amy_a = _ped(a)
+        am_b, amn_b, amy_b = _ped(b)
+        am_mn, am_mx = (am_a, am_b) if am_a <= am_b else (am_b, am_a)
+        amn_mn, amn_mx = (amn_a, amn_b) if amn_a <= amn_b else (amn_b, amn_a)
+
         rows.append((
             # ---- BASE
             ea - eb, na - nb,
@@ -952,6 +1003,15 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             # ---- THIN
             wts_mn, wts_mx, nts_mn, nts_mx, hds_mn, hds_mx,
             sched_thin, opplvl_thin, promo_thin, card_thin,
+            # ---- AMAT
+            am_a - am_b, am_mn, am_mx,
+            # how long ago the amateur career was, for whichever man had one:
+            # requiring BOTH would have populated it on 8 rows in 40,000, and
+            # "the years since the ex-international's last international" is
+            # the same number read from either corner
+            (np.nanmean([amy_a, amy_b])
+             if (amy_a == amy_a or amy_b == amy_b) else np.nan),
+            amn_mn, amn_mx,
         ))
 
         # ------------------------------------------------------------- update

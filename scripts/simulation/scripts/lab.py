@@ -415,6 +415,15 @@ def main() -> None:
         "x-no-ctx": {"feats": "everyx", "drop": "ctx"},
         "x-no-cmp": {"feats": "everyx", "drop": "cmp"},
         "x-no-thin": {"feats": "everyx", "drop": "thin"},
+        "x-no-amat": {"feats": "everyx", "drop": "amat"},
+        # everyx minus the amateur group, plus its single strongest column.
+        # Spelled out rather than expressed as a drop: --drop runs AFTER
+        # resolve, so "everyx+amat1 drop amat" removes d_am again and
+        # silently reproduces x-no-amat.
+        "x-amat1": {"feats": "everyc+lvlr+lvlq+unc+res+ctx+cmp+thin+amat1"},
+        "x-amat": {"feats": "everyc+amat"},
+        "amat-tta": {"feats": "everyx", "tta": True},
+        "noamat-tta": {"feats": "everyx", "drop": "amat", "tta": True},
         "x-thin": {"feats": "everyc+thin"},
         "x-trim": {"feats": "everyx", "drop": "lvlr+lvlq"},
         "x-cmp": {"feats": "everyc+cmp"},
