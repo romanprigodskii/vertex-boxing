@@ -485,6 +485,9 @@ def main() -> None:
         "wcomp50": {"weight": "comp0.50", "tta": True},
         "wcomp10": {"weight": "comp0.10", "tta": True},
         "tta-ref": {"tta": True},
+        # five seeds were chosen when each was worth ~+0.0013 going 1->5.
+        # Nobody has asked what fifteen buys; it is pure compute.
+        "tta-s15": {"tta": True, "seeds": 15},
         "walk-tta": {"tta": True, "walk_months": 12},
         "mirror-tta": {"mirror_train": True, "tta": True},
         "mirror-walk": {"mirror_train": True, "tta": True,

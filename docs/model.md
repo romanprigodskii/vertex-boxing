@@ -402,6 +402,59 @@ like, and none of that is in any database.
 | `leak_check.py` | no feature's missingness may name a corner |
 | `where.py` | where the market's advantage sits on axes we can see before the bell |
 
+## The thesis points the wrong way
+
+This project exists on one claim: that regional and club lines are soft because
+nobody sharp is betting a six-rounder, and that is where the money is. Every
+number above is an average over the quoted set, which cannot speak to it — an
+average hides exactly the thing the claim is about. `regional.py` splits the
+quoted test bouts by level and looks inside. The betting threshold is fixed in
+advance at 2% on the opening price, and CLV is the column to read, because ROI
+on a few hundred bets is noise and CLV converges about twenty times faster.
+
+Every proxy for "how big was this fight" gives the same answer, and it is not
+the answer the thesis predicts.
+
+| by scheduled distance | n | gap to close | CLV | ROI |
+|---|---|---|---|---|
+| 4–6 rounds (club) | 597 | +0.0428 | +0.0043 [+0.0014,+0.0074] | −20.2% |
+| 8 rounds (regional) | 582 | +0.0042 | +0.0091 [+0.0048,+0.0137] | +2.9% |
+| 10 rounds | 1,195 | +0.0325 | +0.0097 [+0.0063,+0.0131] | +4.0% |
+| 12 rounds (title) | 629 | +0.0242 | **+0.0183** [+0.0129,+0.0236] | **+14.6%** |
+
+| by belt and card size | n | gap to close | CLV | ROI |
+|---|---|---|---|---|
+| no belt, card < 8 bouts | 707 | +0.0256 | +0.0089 | +4.1% |
+| no belt, card ≥ 8 | 1,239 | +0.0270 | +0.0060 | −10.2% |
+| regional or national belt | 378 | +0.0294 | +0.0150 | +8.4% |
+| continental/world belt | 964 | +0.0221 | **+0.0156** | **+12.4%** |
+
+By how much record the two men carry it is the same shape: +0.0085 under eight
+bouts, +0.0125 at 8–15, +0.0120 at 15–25.
+
+**The edge is at the top of the sport, not the bottom.** Closing-line value more
+than quadruples from club fights to title fights, and flat-staked ROI goes from
+−20% to +15%. Three proxies that measure different things — the distance, the
+belt, the depth of the records — agree.
+
+The mechanism is the one already diagnosed from the other end. Our features are
+records and ratings, and a rating is only as good as the record under it. At
+world level both men have thirty fights and the ratings are tight; on a club
+card the market knows which of these two is a prospect being moved and we are
+reading two thin records. It is the thin-record finding again — 19.7% of the gap
+on 6% of the bouts — seen from the level axis instead of the record axis.
+
+**What this does and does not license.** It does not prove the unpriced regional
+tail is efficient, and cannot: a four-rounder that gets a line at all is not the
+anonymous tail, it is a prospect showcase on a televised undercard, which is the
+one part of club boxing the market watches closely. The genuinely unpriced
+segment stays unmeasured because nothing prices it.
+
+What it does say is that the plan of chasing the regional tail has no support in
+any evidence this project has ever produced, and the evidence that exists points
+the other way. Effort should go where the edge is measurable: deep records, high
+level, and the fights where our ratings are actually estimated.
+
 ## The honest verdict
 The thesis (softer boxing market) is **directionally right but not a free
 lunch**. Soft regional lines exist, but softness tracks *low liquidity*: the
