@@ -247,7 +247,13 @@ search tuned on a window ending three years before the reporting holdout gained
 (`scripts/simulation/scripts/tune.py` holds the protocol) · weigh-in weights ·
 judges' home bias, even with real country flags · belts and card position, which
 level of bout had already saturated · CatBoost/LogReg ensembling · monotone
-constraints · training on the premium population only.
+constraints · training on the premium population only · **fifteen seeds instead
+of five**, which is exactly identical to four decimal places on every instrument
+(corpus 0.3345 either way) — seed bagging saturates at five and the compute is
+free to spend elsewhere · **backfilling dates of birth from Wikidata**, which
+would add 10 of the 137,878 fighters who lack one, because the 14,792 we have
+already came from there. The only remaining route to age is the walled BoxRec
+profile crawl.
 
 Added 2026-08-01, both of them answers to "surely the weights should differ on
 the fights that are not close":
@@ -458,6 +464,16 @@ nothing to do with the price.
 
 Both columns rise monotonically as the filter tightens, and the last row is the
 first flat-staked ROI interval on this model to exclude zero.
+
+**It is stable in time**, which a noise artefact would not be. Splitting the
+holdout in half by date, CLV at a 2% edge:
+
+| | low level (≤8 rounds, no belt) | high level (12 rounds or continental/world belt) |
+|---|---|---|
+| early half | +0.0083 [+0.0046,+0.0122] n=348 | +0.0159 [+0.0101,+0.0217] n=425 |
+| late half | +0.0056 [+0.0020,+0.0090] n=311 | +0.0134 [+0.0084,+0.0188] n=373 |
+
+Roughly a factor of two in both halves, every interval clear of zero.
 
 **Read the selection caveat before believing the last cell.** The cut-points
 were chosen after looking at the level table, so the +11.3% is a post-hoc
