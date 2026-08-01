@@ -165,6 +165,16 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         big, y_big, w_big = big[order], y_big[order], w_big[order]
     if weight == "quoted":
         w_big = w_big * np.where(B.prem_all[big], 3.0, 1.0)
+    elif weight.startswith("top"):
+        # Tonight's finding says the edge lives on twelve-rounders and title
+        # fights. If those are the only bouts we would ever bet, accuracy on the
+        # four-round undercard is not worth a single split. This is NOT the
+        # premium reweighting that failed — that one was "sched >= 8 and both
+        # men 8 bouts", which is most of the quoted set; this is the top of it.
+        mult = float(weight[3:]) if len(weight) > 3 else 4.0
+        sch = np.nan_to_num(B.feats["sched_rounds"].to_numpy()[big], nan=0)
+        tit = np.nan_to_num(B.feats["title_lvl"].to_numpy()[big], nan=0)
+        w_big = w_big * np.where((sch >= 12) | (tit >= 3), mult, 1.0)
     elif weight.startswith("comp"):
         # Nine tenths of the training corpus is a padded prospect against a
         # journeyman, where the answer is known before the bell and there is
@@ -485,6 +495,8 @@ def main() -> None:
         "wcomp50": {"weight": "comp0.50", "tta": True},
         "wcomp10": {"weight": "comp0.10", "tta": True},
         "tta-ref": {"tta": True},
+        "wtop4": {"weight": "top4", "tta": True},
+        "wtop10": {"weight": "top10", "tta": True},
         # five seeds were chosen when each was worth ~+0.0013 going 1->5.
         # Nobody has asked what fifteen buys; it is pure compute.
         "tta-s15": {"tta": True, "seeds": 15},
