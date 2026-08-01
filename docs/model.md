@@ -135,6 +135,25 @@ de-vig section was written to manage. It also serves as an orientation check on
 this join: had a corner been flipped anywhere, the gap would sit near 0.5 and
 Polymarket would score worse than a coin.
 
+**Our recorded opening line is genuinely early, not a settled number.** The
+worry was that `open_*` is whatever proboxingodds happened to write down, which
+might be hours or days after the market actually opened — in which case the real
+opener would be softer and every edge calculation understates us. The chain
+answers it: Polymarket's FIRST fills sit a median of 0.058 from the feed's open
+and 0.049 from the feed's *close*, so if anything the feed's open is the earlier
+of the two numbers. As a forecast the feed's open scores 0.3318 against
+Polymarket's 0.3596 at its own first fills. There is no hidden softness to catch.
+
+That kills one reason to build forward capture and leaves the real one standing:
+history cannot be bet. The only way to test an edge with money is to take prices
+going forward.
+
+The caveat matters more than the result. These are twelve marquee bouts — Usyk,
+Canelo, Fury — the most efficiently priced segment of the sport. **The thesis
+this project exists to test is about soft REGIONAL lines, and nothing here
+touches them**: proboxingodds prices mostly the notable layer and Polymarket
+prices only stars.
+
 **The bookmaker beat the prediction market on these fights** — 0.3274 against
 0.3643 — which is not what the "near-zero-margin markets are sharper" story
 predicts. On twelve bouts that is noise and nothing more, and it is recorded

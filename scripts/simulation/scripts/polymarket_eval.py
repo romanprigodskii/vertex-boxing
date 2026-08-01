@@ -86,12 +86,18 @@ def main() -> None:
         pre = g[g["dt"] < cut].sort_values("dt")
         if len(pre) < 10:
             continue
-        p_first = float(pre["p_a"].tail(LAST_N).median())
+        p_last = float(pre["p_a"].tail(LAST_N).median())
+        # The TRUE opener, which no odds feed records: the first fills this
+        # market ever took. Our `open_*` column is whatever proboxingodds
+        # happened to write down, and nothing says that was early.
+        p_open = float(pre["p_a"].head(LAST_N).median())
         # p_a is the price of the market's FIRST name; orient it onto corner A
-        p_poly = 1.0 - p_first if flip else p_first
         y = int(str(hit.winner_id) == str(hit.a))
         rows.append({"slug": slug, "q": q, "dt": hit.dt.date(), "row": hit.Index,
-                     "n_pre": len(pre), "p_poly": p_poly,
+                     "n_pre": len(pre),
+                     "p_poly": 1.0 - p_last if flip else p_last,
+                     "p_poly_open": 1.0 - p_open if flip else p_open,
+                     "first_ts": pd.Timestamp(pre["dt"].iloc[0]),
                      "p_model": p_by_row[hit.Index], "y": y,
                      "two_sided": bool(g["two_sided"].iloc[0]),
                      "volume": float(g["volume"].iloc[0])})
@@ -125,8 +131,13 @@ def main() -> None:
     ca = np.where(same, j["close_a"], j["close_b"]).astype(float)
     cb = np.where(same, j["close_b"], j["close_a"]).astype(float)
     ok = np.isfinite(ca) & np.isfinite(cb) & (ca > 1) & (cb > 1)
+    oa = np.where(same, j["open_a"], j["open_b"]).astype(float)
+    ob = np.where(same, j["open_b"], j["open_a"]).astype(float)
+    ook = ok & np.isfinite(oa) & np.isfinite(ob) & (oa > 1) & (ob > 1)
     book = pd.DataFrame({"row": j["index"].to_numpy()[ok],
                          "p_book": ME.devig(1 / ca[ok], 1 / cb[ok], "power")})
+    opens = pd.DataFrame({"row": j["index"].to_numpy()[ook],
+                          "p_feed_open": ME.devig(1 / oa[ook], 1 / ob[ook], "power")})
     m = r.merge(book, on="row", how="inner")
     if len(m) >= 5:
         ym = m["y"].to_numpy()
@@ -138,6 +149,30 @@ def main() -> None:
         print(f"  |Polymarket − де-вигнутый букмекер|: медиана {np.median(gap):.3f}, "
               f"среднее {gap.mean():.3f}")
         print("  ^ маленькое расхождение означает, что де-виг работает")
+    # --- how early is our "open", really? -----------------------------------
+    o = r.merge(opens, on="row", how="inner").merge(book, on="row", how="inner")
+    if len(o) >= 5:
+        yo = o["y"].to_numpy()
+        print(f"\n--- НАСТОЯЩЕЕ открытие против того, что записал фид "
+              f"({len(o)} боёв) ---")
+        print(f"{'дата':11s} {'первые сделки':>14s} {'open фида':>10s} "
+              f"{'close фида':>11s} {'A выиграл':>10s}")
+        for t in o.sort_values("dt").itertuples(index=False):
+            print(f"{str(t.dt):11s} {t.p_poly_open:14.3f} {t.p_feed_open:10.3f} "
+                  f"{t.p_book:11.3f} {'да' if t.y else 'нет':>10s}")
+        for nm, col in (("Polymarket, первые сделки", "p_poly_open"),
+                        ("Polymarket, перед гонгом", "p_poly"),
+                        ("open фида", "p_feed_open"),
+                        ("close фида", "p_book")):
+            print(f"  {nm:26s} log-loss {ll(o[col].to_numpy(), yo).mean():.4f}")
+        d_of = np.abs(o["p_poly_open"] - o["p_feed_open"])
+        d_cf = np.abs(o["p_poly_open"] - o["p_book"])
+        print(f"\n  |первые сделки − open фида| : медиана {np.median(d_of):.3f}")
+        print(f"  |первые сделки − close фида|: медиана {np.median(d_cf):.3f}")
+        print("  ^ если первое ЗАМЕТНО меньше второго, фид пишет уже "
+              "устоявшуюся цену,\n    и настоящий опенер мягче того, "
+              "по чему мы считаем эдж")
+
     if misses:
         print(f"\nне сматчились ({len(misses)}):")
         for dt_, q in misses[:12]:
