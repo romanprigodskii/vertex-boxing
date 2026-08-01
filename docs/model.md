@@ -5,41 +5,85 @@ mature; this documents exactly what carries over and what must change. The plan
 below is kept as written; what follows immediately is what actually happened
 when it was run.
 
-## Where it stands (measured 2026-08-01)
+## Where it stands (measured 2026-08-01, second pass)
 
-One command reproduces it: `scripts/simulation/scripts/market_eval.py --blend`.
-The defaults ARE the best known model. Three instruments, because the quoted set
-alone cannot resolve 0.005 and the corpus alone is four fifths club boxing the
-market never prices.
+One command reproduces it: `market_eval.py --tta --blend`. The defaults ARE the
+best known model. Three instruments, because the quoted set alone cannot resolve
+0.005 and the corpus alone is four fifths club boxing the market never prices.
 
-| instrument | n | log-loss |
-|---|---|---|
-| corpus holdout | 89,087 | 0.3390 |
-| premium holdout (sched ≥8, both ≥8 bouts) | 12,536 | 0.2901 |
-| quoted, against the close | 3,288 | 0.3799 vs the market's 0.3469 |
+| instrument | n | log-loss | was | paired gain |
+|---|---|---|---|---|
+| corpus holdout | 89,087 | **0.3346** | 0.3390 | +0.0044 [+0.0038,+0.0051] |
+| premium holdout (sched ≥8, both ≥8 bouts) | 12,536 | **0.2859** | 0.2901 | +0.0042 [+0.0025,+0.0060] |
+| quoted, against the close | 3,288 | **0.3729** vs the market's 0.3469 | 0.3799 | +0.0070 [+0.0032,+0.0107] |
+
+The gap to the closing line is **−0.0260**, down from −0.0329: a fifth of it
+closed. The blend now beats the close by **+0.0041 [+0.0020, +0.0062]** (λ 0.18,
+up from 0.15 — the price has less to say about the model than it used to), and
+clean CLV rose from +0.0106 to **+0.0114 of probability [+0.0092, +0.0135] over
+1,979 bets** at a 2% edge.
+
+### What the second pass changed, in order of size
+1. **87 new features** (`everyx`, 200 columns), +0.0025 on the confirmation half
+   [+0.0017,+0.0033]. Not one of the six groups is worth anything alone; the
+   block is. What carries it is `cmp` (+0.0016) — do these two ratings even
+   come from the same graph — and `thin` (+0.0006).
+2. **Test-time symmetrisation** (`--tta`), a further +0.0017 on the confirmation
+   half and +0.0030 on the quoted set. A boxing match has no corner A, but the
+   model's answer depended on which name was typed first; asking it both ways
+   and averaging the two logits cancels the half of that which is noise. One
+   extra forward pass, no retraining.
+3. **Training on both orientations** (`--mirror`), +0.0016 more at 2.5× the
+   training time. Measured on one seed.
+4. **Retraining as time passes** (walk-forward, 12 months), +0.0019 on the
+   confirmation half and +0.0000 on the selection half — which is the signature
+   of staleness and not of a better model, since the selection half is the year
+   right after the cutoff and the confirmation half is two years later. One
+   seed. Deployment would do this anyway.
+
+### The three defects the mirror found
+Building the mirrored matrix by a second replay rather than by negating columns
+made a test possible that had never been run: every column must be a difference
+that negates, a quantity invariant to the swap, a probability that becomes 1−p,
+or half of a pair that trades with its twin. `mirror_check.py` runs it and
+found three columns that failed — `city_home_bias`, `jud_fav` and the
+`d_elo_jud` built on it. All three were tie-breaks written `>=`, so when two
+fighters had equal ratings (or neither was local) the update fell through to
+"corner A" and a quantity that is a fact about a city or a judge came out
+different depending on which way round the bout had been written down. Fixed by
+refusing to update when there is no favourite and no local man.
 
 ### The board has three prices and they answer different questions
 
-| reading | margin | market | model | gap | blend over market |
-|---|---|---|---|---|---|
-| worst price on the board | 6.2% | **0.3469** | 0.3799 | −0.0329 | +0.0036 [+0.0017,+0.0054] |
-| best price on the board | 3.0% | 0.3527 | 0.3833 | −0.0306 | +0.0040 [+0.0018,+0.0061] |
-| opening line | 5.6% | 0.3591 | 0.3799 | −0.0208 | +0.0088 [+0.0045,+0.0130] |
+| reading | margin | market | model | gap | λ | blend over market |
+|---|---|---|---|---|---|---|
+| worst price on the board | 6.2% | **0.3469** | 0.3729 | −0.0260 | 0.18 | +0.0041 [+0.0020,+0.0062] |
+| best price on the board | 3.0% | 0.3527 | 0.3774 | −0.0247 | 0.19 | +0.0044 [+0.0019,+0.0068] |
+| opening line | 5.6% | 0.3591 | 0.3729 | −0.0138 | 0.37 | +0.0096 [+0.0053,+0.0139] |
+
+(was −0.0329 / −0.0306 / −0.0208 at λ 0.15 / 0.16 / 0.33 before the second pass;
+λ rising is the point — the price now accounts for less of what the model knows.)
 
 **The best price is the worst forecast.** Best-of-market is not the market's
 opinion; it is the upper envelope over ten books, so taking the maximum on both
 sides picks out the two books that most disagree with consensus. Bet at the best
-price, score against a balanced one. The blend beats the market under all four
-de-vig methods on the best price (power +0.0040, Shin +0.0046, additive +0.0045,
-proportional +0.0062).
+price, score against a balanced one. The blend beat the market under all four
+de-vig methods on the best price before the second pass (power +0.0040, Shin
++0.0046, additive +0.0045, proportional +0.0062) and the second pass moved the
+power reading, the one `--devig auto` picks, to +0.0044. The other three have
+not been re-measured on the new model; they were never the binding case.
 
 ### The two results that are not circular
 The model never sees a price, so its closing-line value is clean: taking its
-picks at the OPEN and marking to the close is worth **+0.0111 of probability
-[+0.0091, +0.0130] over 2,234 bets**, replicating +0.0117 measured on a smaller
-set. And the first ROI interval to exclude zero on a real sample: competitive
-bouts (market 30–70%), a 2% edge, settled at the best price — **+10.59%
-[+0.74%, +20.54%] over 433 bets.**
+picks at the OPEN and marking to the close is worth **+0.0114 of probability
+[+0.0092, +0.0135] over 1,979 bets** at a 2% edge (was +0.0106 before the second
+pass; +0.0152 at a 5% edge over 1,323). Flat-staked ROI into the real closing
+number also improved at every threshold — −6.30% → −3.25% at a 2% edge,
++5.10% → +6.41% on competitive bouts — though none of those intervals excludes
+zero on this sample.
+
+Measure CLV in PROBABILITY. The price-space null — bet a random side at the open,
+mark to the close — is +3.30%, which is the two margins and nothing else.
 
 Measure CLV in PROBABILITY. The price-space null — bet a random side at the open,
 mark to the close — is +3.5% reading the close as the worst price and −4.9%
@@ -76,6 +120,34 @@ Glicko-2 +0.0042 · referee +0.0016 · judges' scorecards in the ratings +0.0018
 durability and mileage +0.0016 · level of bout +0.0015 · head-to-head and common
 opponents +0.0014 · "both profiles known" +0.0018.
 
+The six groups added on 2026-08-01, leave-one-out on the corpus holdout at one
+seed (so ±0.001, and only `cmp` is clear of it):
+
+| group | what it is | dropping it costs |
+|---|---|---|
+| `cmp` | same passport, venue-histogram cosine, days since a stoppage loss, journeyman index, rating z-score against the population active that month | **+0.0016** |
+| `lvlr`+`lvlq` | the LEVEL of every rating and rate, not only the difference — min and max over the two corners | +0.0010 |
+| `thin` | one-sided-tolerant records, and what the card says when one man has none | +0.0006 |
+| `res` | performance against what Elo expected, and the fall from a career peak | +0.0006 |
+| `ctx` | running upset rate by country, promoter, division, distance | +0.0005 |
+| `unc` | Glickman's expected score, gaps divided by their own standard error | +0.0000 |
+
+Read that table as a whole, not row by row: none of the six is worth anything on
+its own (each scored +0.0000 to −0.0002 when added to `everyc` alone), and
+together they are worth +0.0025. They are six ways of saying the same thing —
+how much should a rating gap be trusted HERE — and the model needed enough of
+them at once to tell the cases apart.
+
+### The three instruments, and why a one-seed screen cannot see 0.001
+The corpus holdout is split in half by date: the EARLY half selects, the LATE
+half reports, and nothing is ever chosen on the late half (`lab.py`). And seed
+noise is not bout noise — a paired bootstrap over bouts does not see it at all.
+The same configuration on three seed sets scores 0.3375 / 0.3377 / 0.3379 on the
+corpus and 0.3326 / 0.3332 / 0.3336 on the confirmation half, so **a one-seed
+screen resolves about 0.001 and no better**. Everything above 0.002 was
+re-measured on five seeds before it was believed; everything at 0.001 is
+reported as one seed and labelled as such.
+
 ### Measured dead ends — do not re-run these
 Isotonic or Platt calibration of any population (isotonic on 29k club bouts cost
 0.003 on the quoted set) · calibration whose slope varies with the matchup's own
@@ -91,25 +163,57 @@ judges' home bias, even with real country flags · belts and card position, whic
 level of bout had already saturated · CatBoost/LogReg ensembling · monotone
 constraints · training on the premium population only.
 
-### The diagnosis that is still open
-The model equals the market in the middle of the scale — on bouts priced 10-20%
-from even it is 0.4682 against 0.4590 — and the whole gap sits at the two ends
-with the errors pointing opposite ways. On bouts the market calls 30-70% the
-model scores 0.713 against a coin flip's 0.693; on 95% favourites it will not go
-far enough. Inside the competitive band its calibration slope is 0.240 while on
-the whole test set it is 0.939: calibrated on average, and collapsing exactly
-where the price disagrees with it. Nothing in our own features identifies those
-bouts — only the price does, and the price is eval-only.
+### The diagnosis, rewritten from the second pass
+The old diagnosis — "the model is over-confident where the price says pick'em" —
+was reading a per-bout table without weighting it by how many bouts are in each
+band. Weighted, the gap is nearly FLAT across the price scale (+0.0066, +0.0073,
++0.0043, +0.0070, +0.0072 of the total, from 95% favourites down to coin flips).
+And the model is not miscalibrated: its slope is 0.989 on the corpus holdout,
+0.998 on the premium one, 0.943 on the quoted set. Shrinking every logit by a
+factor chosen *on the test set itself* — an oracle no honest model gets — buys
+0.0005. **There is no calibration fix, because there is nothing to calibrate.**
+
+What there is instead, from `where.py`:
+
+- **77% of the gap is on bouts where the MARKET is bolder than we are**, not the
+  other way round (0.3996 against 0.3449 there, against 0.3628/0.3487 where we
+  are bolder). The failure is missing information, not misplaced confidence.
+- **Where our own evidence runs out, it runs out completely.** On the 205 bouts
+  (6.2%) where the less experienced man has fewer than three recorded bouts, the
+  market scores 0.1379 and we score 0.2491 — **19.7% of the whole gap**. A
+  debutant priced at 97% is an amateur international and the corpus has never
+  heard of him.
+- **Where we say "coin flip" the market usually is not guessing**: on the 373
+  bouts where our |logit| is under 0.5, the market scores 0.5986 to our 0.6889 —
+  31% of the gap.
 
 ### What would move the needle next
-Not features: the last three groups added were worth +0.0008 on the premium
-holdout between them, and hyper-parameters are exhausted. The binding constraint
-is the yardstick. proboxingodds.com's front page is a LIVE ten-book board that
-includes Polymarket and Kalshi — near-zero-margin prediction markets, a far
-sharper benchmark than any historical close — and it exists only going forward:
-nothing about it can be recovered after the fact. Forward capture is at zero of
-five parts, and every day it stays there is a day of the only benchmark that
-would settle the thesis.
+1. **Amateur pedigree.** It is the largest addressable block on the board: a
+   fifth of the deficit sits on debutants and near-debutants, and BoxRec carries
+   an amateur tab while Wikidata carries Olympic medals. This is a crawl, not a
+   feature.
+2. **Walk-forward in production.** +0.0019 on the second half of the holdout for
+   nothing but a cron entry, and it grows with the age of the model.
+3. **The yardstick.** proboxingodds.com's front page is a LIVE ten-book board
+   including Polymarket and Kalshi — near-zero-margin prediction markets, a far
+   sharper benchmark than any historical close — and it exists only going
+   forward: nothing about it can be recovered after the fact. Forward capture is
+   at zero of five parts.
+4. Not hyper-parameters. Re-checked on the real protocol: 63→31→127→255 leaves,
+   lr 0.03→0.015, min_data 30→300, λ₂ 5→30, feature fraction 0.9→0.6 — the best
+   of them is worth +0.0006 on the confirmation half and none has an interval
+   clear of zero. And not the quoted-population reweighting (−0.0019), nor
+   folding draws into the target (+0.0000), nor Glickman's expected score as a
+   boosting offset (+0.0001).
+
+### The four scripts that hold the method
+| script | what it is for |
+|---|---|
+| `market_eval.py` | the scoreboard. One command, three instruments, the blend |
+| `lab.py` | the bench. One data load, many variants, a paired verdict each; the holdout split into a half that selects and a half that reports |
+| `mirror_check.py` | every column of the mirrored matrix must negate, stay put, become 1−p, or trade with its twin. Found three real defects the first time it ran |
+| `leak_check.py` | no feature's missingness may name a corner |
+| `where.py` | where the market's advantage sits on axes we can see before the bell |
 
 ## The honest verdict
 The thesis (softer boxing market) is **directionally right but not a free
