@@ -101,6 +101,48 @@ de-vig methods on the best price before the second pass (power +0.0040, Shin
 power reading, the one `--devig auto` picks, to +0.0044. The other three have
 not been re-measured on the new model; they were never the binding case.
 
+### The margin defence is closed: a price with nothing to remove
+
+Every other number in this file is scored against a bookmaker, and a bookmaker's
+price has a margin in it that has to be modelled away first — so there is always
+a lingering "maybe the model only trails a particular reading of the de-vig".
+Polymarket settles that. It is a two-sided traded book with essentially no
+margin, and its history is recoverable from Polygon (`run_polymarket.py`:
+84,729 fills across 67 who-wins markets, $37.9M of volume, 2024-01 to 2026-08).
+
+`polymarket_eval.py` matched 14 of them to corpus bouts. On the 12 where the
+bookmaker also priced the fight:
+
+| | log-loss |
+|---|---|
+| bookmaker close, power de-vig | **0.3274** |
+| Polymarket, no margin at all | 0.3643 |
+| our model | 0.4402 |
+
+**The model trails a zero-margin price, so the margin was never the explanation.**
+And the price used here is deliberately handicapped: it is the median of the last
+25 fills strictly before 00:00 UTC on the day of the bout, so it throws away the
+day-of movement and is duller than the real close. The conclusion holds a
+fortiori.
+
+Two things fall out of it that are worth more than the headline.
+
+**The de-vig is audited and it passes.** The zero-margin price and our
+power-de-vigged bookmaker close agree to a median of 0.047 of probability. Two
+independent sources, one with the margin removed by our method and one with no
+margin to remove, land in the same place. That retires the worry the whole
+de-vig section was written to manage. It also serves as an orientation check on
+this join: had a corner been flipped anywhere, the gap would sit near 0.5 and
+Polymarket would score worse than a coin.
+
+**The bookmaker beat the prediction market on these fights** — 0.3274 against
+0.3643 — which is not what the "near-zero-margin markets are sharper" story
+predicts. On twelve bouts that is noise and nothing more, and it is recorded
+only so that nobody rebuilds the yardstick around Polymarket expecting it to be
+strictly better. The model−Polymarket gap over all 14 is +0.0682 with an
+interval of [−0.0668, +0.2023]: this instrument cannot resolve anything near
+0.002, and was never going to.
+
 ### The two results that are not circular
 The model never sees a price, so its closing-line value is clean: taking its
 picks at the OPEN and marking to the close is worth **+0.0114 of probability
