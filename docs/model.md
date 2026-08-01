@@ -7,21 +7,26 @@ when it was run.
 
 ## Where it stands (measured 2026-08-01, second pass)
 
-One command reproduces it: `market_eval.py --tta --blend`. The defaults ARE the
-best known model. Three instruments, because the quoted set alone cannot resolve
+One command reproduces it: `market_eval.py --tta --mirror --blend`. The
+defaults ARE the best known model. Three instruments, because the quoted set alone cannot resolve
 0.005 and the corpus alone is four fifths club boxing the market never prices.
 
 | instrument | n | log-loss | was | paired gain |
 |---|---|---|---|---|
-| corpus holdout | 89,087 | **0.3346** | 0.3390 | +0.0044 [+0.0038,+0.0051] |
-| premium holdout (sched ≥8, both ≥8 bouts) | 12,536 | **0.2859** | 0.2901 | +0.0042 [+0.0025,+0.0060] |
-| quoted, against the close | 3,288 | **0.3729** vs the market's 0.3469 | 0.3799 | +0.0070 [+0.0032,+0.0107] |
+| corpus holdout | 89,087 | **0.3325** | 0.3390 | +0.0065 |
+| premium holdout (sched ≥8, both ≥8 bouts) | 12,536 | **0.2845** | 0.2901 | +0.0056 |
+| quoted, against the close | 3,288 | **0.3725** vs the market's 0.3469 | 0.3799 | +0.0074 |
 
-The gap to the closing line is **−0.0260**, down from −0.0329: a fifth of it
-closed. The blend now beats the close by **+0.0041 [+0.0020, +0.0062]** (λ 0.18,
+The gap to the closing line is **−0.0255**, down from −0.0329: a fifth of it
+closed. The blend now beats the close by **+0.0045 [+0.0024, +0.0066]** (λ 0.18,
 up from 0.15 — the price has less to say about the model than it used to), and
 clean CLV rose from +0.0106 to **+0.0114 of probability [+0.0092, +0.0135] over
 1,979 bets** at a 2% edge.
+
+Walk-forward retraining every 12 months is worth a further +0.0024 on the
+confirmation half and +0.0014 on the premium holdout, five seeds, and it is not
+a flag on the scoreboard: retraining is a property of a deployment, not of a
+measurement. `lab.py --exp walk-tta` has it.
 
 ### What the second pass changed, in order of size
 1. **87 new features** (`everyx`, 200 columns), +0.0025 on the confirmation half
@@ -33,13 +38,15 @@ clean CLV rose from +0.0106 to **+0.0114 of probability [+0.0092, +0.0135] over
    model's answer depended on which name was typed first; asking it both ways
    and averaging the two logits cancels the half of that which is noise. One
    extra forward pass, no retraining.
-3. **Training on both orientations** (`--mirror`), +0.0016 more at 2.5× the
-   training time. Measured on one seed.
-4. **Retraining as time passes** (walk-forward, 12 months), +0.0019 on the
-   confirmation half and +0.0000 on the selection half — which is the signature
-   of staleness and not of a better model, since the selection half is the year
-   right after the cutoff and the confirmation half is two years later. One
-   seed. Deployment would do this anyway.
+3. **Training on both orientations** (`--mirror`), a further **+0.0022 on the
+   confirmation half [+0.0017,+0.0028] and +0.0020 on the premium holdout
+   [+0.0009,+0.0032]**, five seeds, at 2.5× the training time.
+4. **Retraining as time passes** (walk-forward, 12 months), **+0.0024 on the
+   confirmation half and +0.0014 on the premium holdout**, five seeds — and
+   +0.0030 on the selection half against +0.0043 on the confirmation half,
+   which is the signature of staleness rather than of a better model, since the
+   selection half is the year right after the cutoff and the confirmation half
+   is two years later. Deployment would do this anyway.
 
 ### The three defects the mirror found
 Building the mirrored matrix by a second replay rather than by negating columns
@@ -57,12 +64,14 @@ refusing to update when there is no favourite and no local man.
 
 | reading | margin | market | model | gap | λ | blend over market |
 |---|---|---|---|---|---|---|
-| worst price on the board | 6.2% | **0.3469** | 0.3729 | −0.0260 | 0.18 | +0.0041 [+0.0020,+0.0062] |
+| worst price on the board | 6.2% | **0.3469** | 0.3725 | −0.0255 | 0.18 | +0.0045 [+0.0024,+0.0066] |
 | best price on the board | 3.0% | 0.3527 | 0.3774 | −0.0247 | 0.19 | +0.0044 [+0.0019,+0.0068] |
 | opening line | 5.6% | 0.3591 | 0.3729 | −0.0138 | 0.37 | +0.0096 [+0.0053,+0.0139] |
 
 (was −0.0329 / −0.0306 / −0.0208 at λ 0.15 / 0.16 / 0.33 before the second pass;
-λ rising is the point — the price now accounts for less of what the model knows.)
+λ rising is the point — the price now accounts for less of what the model knows.
+The first row is `--tta --mirror`; the other two are `--tta` only and have not
+been re-run with the mirror, which is worth about 0.0005 to the model column.)
 
 **The best price is the worst forecast.** Best-of-market is not the market's
 opinion; it is the upper envelope over ten books, so taking the maximum on both
@@ -159,6 +168,39 @@ search tuned on a window ending three years before the reporting holdout gained
 judges' home bias, even with real country flags · belts and card position, which
 level of bout had already saturated · CatBoost/LogReg ensembling · monotone
 constraints · training on the premium population only.
+
+Added 2026-08-01, both of them answers to "surely the weights should differ on
+the fights that are not close":
+
+**A λ that varies with how lopsided the PRICE is** (`--bandblend`). This is not
+the fading blend that failed — that one keyed λ on the model-market
+disagreement, a quantity the blend partly creates; this keys it on the price's
+own distance from even, which is fixed before the model speaks. It still loses:
+0.3434 against the constant blend's 0.3428, +0.0035 over the market instead of
++0.0041. The fitted weights say why — 0.13 / 0.16 / 0.27 / 0.13 across the four
+bands, non-monotone, with the most competitive band fitted on 260 bouts. There
+are 2,472 bouts in the fitting window and four parameters do not survive being
+carved out of them. The constant λ keeps winning for the same reason it beat the
+two-weight logistic and the fade: one parameter is all this window can pay for.
+
+**Weighting training bouts by how close the ratings said they were**, 4p(1−p)
+from the Elo-implied probability with a floor, so that the nine tenths of the
+corpus which is a padded prospect against a journeyman stops dominating. Again
+not the quoted-population reweighting that failed, which asked "is this the kind
+of card the market prices" rather than "was this fight in doubt". Floors 0.50 /
+0.25 / 0.10 give corpus 0.3350 / 0.3350 / 0.3343 against 0.3348 for no weighting
+— the most aggressive is worth about +0.0007 on the confirmation half, which is
+two standard errors at three seeds, and it is worth **nothing at all** on the
+premium holdout (0.2860 either way) or the quoted set (0.3729 against 0.3727).
+A gain that appears only on the four-round club boxing the market never prices
+is not a gain worth having.
+
+**Averaging models fitted with different half-lives** (3, 6 and 12 years, logits
+averaged). The idea is sound — the members disagree for a reason rather than by
+accident, which is what usually makes an average beat its best member — and it
+returns +0.0003 on the confirmation half and +0.0006 on the premium holdout for
+three times the training cost. Half-life is simply not a live axis here: 6 years
+was already close enough to the optimum that spreading around it buys nothing.
 
 ### The diagnosis, rewritten from the second pass
 The old diagnosis — "the model is over-confident where the price says pick'em" —

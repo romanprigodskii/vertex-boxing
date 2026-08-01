@@ -4,25 +4,34 @@ Everything else is a knob on this. Feature sets, calibration population,
 training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
-The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with --tta,
-corpus 0.3346 / premium 0.2859 / -0.0260 against the close, measured 2026-08-01.
+The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with
+--tta --mirror, corpus 0.3325 / premium 0.2845 / -0.0255 against the close and a
+blend of +0.0045 [+0.0024, +0.0066], measured 2026-08-01.
 Every one of them was a measurement — no calibration because isotonic on 29k
 club bouts cost 0.003 on the quoted set, a six-year half-life and five seeds
 because each is worth about +0.0013, 63 leaves because a 500-trial search could
 not beat it, and `everyx` because the 87 features added on 2026-08-01 are worth
 +0.0025 on the confirmation half of the holdout.
 
-  ./venv/bin/python scripts/market_eval.py --tta --blend        <- the headline
+  ./venv/bin/python scripts/market_eval.py --tta --mirror --blend   <- headline
   ./venv/bin/python scripts/market_eval.py --feats everyc --drop ref --label no-ref
   ./venv/bin/python scripts/market_eval.py --tta --price open --blend --label open
 
---tta is on the command line rather than on by default only because it needs the
-mirrored matrix, which is a second full replay the first time it is asked for.
-There is no reason not to pass it: it costs one extra forward pass and it is
-worth +0.0042 on the confirmation half, +0.0044 on the premium holdout and
-+0.0061 on the quoted set, all with intervals clear of zero on five seeds.
---mirror trains on both orientations as well and is worth a further +0.0016, at
-two and a half times the training time.
+--tta and --mirror are on the command line rather than on by default only because
+they need the mirrored matrix, which is a second full replay the first time it is
+asked for. There is no reason not to pass both. Measured on five seeds, each
+against the configuration below it:
+
+  --tta      one extra forward pass, no retraining
+             +0.0042 confirmation half · +0.0044 premium · +0.0061 quoted
+  --mirror   trains on both orientations, ~2.5x the training time
+             +0.0022 confirmation half [+0.0017,+0.0028] · +0.0020 premium
+
+Walk-forward retraining every 12 months is worth another +0.0024 on the
+confirmation half and +0.0014 on the premium holdout, and it is deliberately not
+a flag here: this script measures one model against one closing line, and
+retraining is a property of a deployment, not of a scoreboard. `lab.py --exp
+walk-tta` measures it.
 """
 
 from __future__ import annotations
@@ -779,6 +788,43 @@ def main() -> None:  # noqa: PLR0915
         cm, ck = lam, 1 - lam
         p_bl = np.clip(1 / (1 + np.exp(-(lam * lte_m + (1 - lam) * lte_k))),
                        1e-6, 1 - 1e-6)
+
+        if "--bandblend" in sys.argv:
+            # One λ says "trust the model this much, always". But the model is
+            # not equally useful everywhere on the scale: on a 95% favourite the
+            # price is almost a certainty and there is little left to add, while
+            # on a pick'em both sides are guessing. So fit λ SEPARATELY by how
+            # far the price sits from even.
+            #
+            # This is NOT the fading blend that failed. That one keyed λ on the
+            # model-market DISAGREEMENT, which is a quantity the blend partly
+            # creates; this keys it on the price's own position, which is fixed
+            # before the model says anything. It is still eval-only — the blend
+            # takes a closing price as input either way — so no new circularity
+            # is introduced, only new parameters, and the risk is the ordinary
+            # one of fitting four numbers where one was fitted before.
+            qtr = np.minimum(p_mkt[tr], 1 - p_mkt[tr])
+            qte = np.minimum(pm, 1 - pm)
+            edges = [float(x) for x in arg("--bands", "0,0.10,0.20,0.35,0.51").split(",")]
+            lam_b, w_te = [], np.full(len(qte), lam)
+            for lo_, hi_ in zip(edges[:-1], edges[1:]):
+                mtr = (qtr >= lo_) & (qtr < hi_)
+                if mtr.sum() < 150:
+                    lam_b.append((lo_, hi_, lam, int(mtr.sum())))
+                    continue
+                L = [log_loss(y[tr][mtr],
+                              1 / (1 + np.exp(-(g * ltr_m[mtr] + (1 - g) * ltr_k[mtr]))))
+                     for g in grid]
+                gb = float(grid[int(np.argmin(L))])
+                lam_b.append((lo_, hi_, gb, int(mtr.sum())))
+                w_te[(qte >= lo_) & (qte < hi_)] = gb
+            p_bl = np.clip(1 / (1 + np.exp(-(w_te * lte_m + (1 - w_te) * lte_k))),
+                           1e-6, 1 - 1e-6)
+            cm, ck = float(np.mean(w_te)), float(1 - np.mean(w_te))
+            print("\n  ПОЛОСНОЙ БЛЕНД  λ по удалённости цены от 50/50:")
+            for lo_, hi_, g, n_ in lam_b:
+                print(f"    {lo_:.2f}-{hi_:.2f}  λ {g:.2f}  (подобрано на {n_:,} боях, "
+                      f"тест {int(((qte >= lo_) & (qte < hi_)).sum()):,})")
 
         if "--fade" in sys.argv:
             # A constant λ says "trust the model this much, always". The test

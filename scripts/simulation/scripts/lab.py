@@ -165,6 +165,21 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         big, y_big, w_big = big[order], y_big[order], w_big[order]
     if weight == "quoted":
         w_big = w_big * np.where(B.prem_all[big], 3.0, 1.0)
+    elif weight.startswith("comp"):
+        # Nine tenths of the training corpus is a padded prospect against a
+        # journeyman, where the answer is known before the bell and there is
+        # nothing to learn. Weight a bout by how close the ratings said it was —
+        # 4p(1−p) from the Elo-implied probability, which is 1 at a coin flip
+        # and falls to 0 at a mismatch — with a floor so the easy bouts still
+        # teach the model what a certainty looks like.
+        #
+        # This is NOT the quoted-population reweighting that failed. That one
+        # asked "is this the kind of card the market prices"; this asks "was
+        # this fight in doubt", which is the axis the model is actually weak on.
+        floor = float(weight[4:]) if len(weight) > 4 else 0.25
+        pe = 1.0 / (1.0 + 10 ** (-B.feats["d_elo"].to_numpy()[big] / 400.0))
+        comp = 4.0 * pe * (1.0 - pe)
+        w_big = w_big * (floor + (1.0 - floor) * np.nan_to_num(comp, nan=0.5))
     if halflife > 0:
         yrs = (np.datetime64(cutoff, "D") - B.dt[big]) / np.timedelta64(365, "D")
         w_big = w_big * 0.5 ** (np.clip(yrs, 0, None) / halflife)
@@ -212,6 +227,13 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
                       init_score=z0tr if init_score else None)
     dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr,
                       init_score=z0va if init_score else None)
+    # Bin now and drop our own copy. With --mirror the training frame is 612k
+    # rows by 200 columns and it is held alongside the base matrix, the mirror,
+    # and both of their column subsets — enough to put a 16GB machine into swap,
+    # where a five-seed run stops looking slow and starts looking hung.
+    dtr.construct(); dva.construct()
+    if not finetune:                 # the fine-tune path still reads the frames
+        del Xtr, Xva
     models = []
     for k in range(seeds):
         p = dict(params, seed=seed0 + k, bagging_seed=seed0 + k,
@@ -284,7 +306,7 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
 
 
 def run(bench: Bench, cols: list[str], *, walk_months: int = 0,
-        extra: dict | None = None, **kw) -> dict:
+        hl_mix: list | None = None, extra: dict | None = None, **kw) -> dict:
     """Score one configuration on all three instruments.
 
     walk_months > 0 retrains at that cadence through the holdout instead of
@@ -293,7 +315,24 @@ def run(bench: Bench, cols: list[str], *, walk_months: int = 0,
     staleness — measured rather than assumed.
     """
     B = bench
-    if walk_months <= 0:
+    if hl_mix:
+        # A half-life is a claim about how fast a bout stops being evidence, and
+        # six years is a compromise between two different claims: three years
+        # tracks a fighter who is changing, twelve remembers a division. Rather
+        # than pick, fit one model per half-life and average the logits — the
+        # same trick as seed bagging, but the members disagree for a reason
+        # instead of by accident, which is what makes an average worth more than
+        # its best member.
+        lgs, trees = [], []
+        for h in hl_mix:
+            pr = fit(B, cols, B.cutoff, halflife=h, **kw)
+            lgs.append((np.log(pr(B.post) / (1 - pr(B.post))),
+                        np.log(pr(B.jidx[B.qte]) / (1 - pr(B.jidx[B.qte])))))
+            trees.append(pr.n_trees)
+        p_corp = 1 / (1 + np.exp(-np.mean([a for a, _ in lgs], axis=0)))
+        p_q = 1 / (1 + np.exp(-np.mean([b for _, b in lgs], axis=0)))
+        n_trees = float(np.mean(trees))
+    elif walk_months <= 0:
         pr = fit(B, cols, B.cutoff, **kw)
         p_corp, p_q, n_trees = pr(B.post), pr(B.jidx[B.qte]), pr.n_trees
     else:
@@ -442,6 +481,17 @@ def main() -> None:
         "draws+mirror+tta": {"draws": True, "mirror_train": True, "tta": True},
         "finetune": {"finetune": 400},
         "wquoted": {"weight": "quoted"},
+        "wcomp25": {"weight": "comp0.25", "tta": True},
+        "wcomp50": {"weight": "comp0.50", "tta": True},
+        "wcomp10": {"weight": "comp0.10", "tta": True},
+        "tta-ref": {"tta": True},
+        "walk-tta": {"tta": True, "walk_months": 12},
+        "mirror-tta": {"mirror_train": True, "tta": True},
+        "mirror-walk": {"mirror_train": True, "tta": True,
+                        "walk_months": 12},
+        "hlmix": {"tta": True, "hl_mix": [3.0, 6.0, 12.0]},
+        "hlmix-mirror": {"mirror_train": True, "tta": True,
+                         "hl_mix": [3.0, 6.0, 12.0]},
         "leaves127": {"params_over": {"num_leaves": 127}},
         "leaves31": {"params_over": {"num_leaves": 31}},
         "leaves255-lr02": {"params_over": {"num_leaves": 255, "learning_rate": 0.02}},
