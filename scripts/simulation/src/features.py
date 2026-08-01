@@ -36,7 +36,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 6
+FEATS_VERSION = 9
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -132,12 +132,74 @@ OFF = REF + JUD + ["off_known"]
 # 8.3 scheduled rounds against 0.1% and 4.3 in the last sixth.
 CARD = ["d_home_true", "home_known", "title_lvl", "is_title", "card_pos", "is_main"]
 
+# ---- groups added 2026-08-01 ------------------------------------------------
+# LEVELS. Almost every number above reaches the model as a DIFFERENCE, so two
+# 1700s and a 1700 against a 1300 are the same row. That is exactly the
+# distinction the market makes and we do not: a 200-point edge between two
+# world-class men is a fight, and between two novices it is a formality. min and
+# max are the orientation-invariant way to say it — a mean would say it too, but
+# the min is the one that carries "the weaker man is a total novice".
+LVLR = ["elo_min", "elo_max", "gl_min", "gl_max", "rd_min", "rd_max",
+        "n_min", "n_max", "ntrue_min", "ntrue_max", "career_min", "career_max",
+        "schedmax_min", "schedmax_max", "peak_min", "peak_max"]
+LVLQ = ["wr_min", "wr_max", "wrtrue_min", "wrtrue_max", "ko_min", "ko_max",
+        "koed_min", "koed_max", "dist_min", "dist_max", "sos_min", "sos_max",
+        "oppwr_min", "oppwr_max", "oppgl_min", "oppgl_max", "b365_min",
+        "b365_max", "mile_min", "mile_max", "opp3_min", "opp3_max",
+        "bt8_min", "bt8_max"]
+# The interactions a tree has to discover from scratch and mostly does not,
+# because 90% of its training rows are club bouts where they do not bind.
+# glicko_e is Glickman's own expected score: the same rating gap, deflated by
+# how unconverged the two ratings are. A tree given the gap and the two RDs
+# separately has to carve that surface out of axis-parallel cuts.
+UNC = ["glicko_e", "d_glicko_z", "d_elo_z", "d_bt_z", "d_elo_less_sos",
+       "rating_disagree", "d_elo_x_lvl", "d_glicko_x_sched"]
+# Performance against expectation, rather than performance. A man who is 12-0
+# against nobody and a man who is 9-3 against contenders have the same shape in
+# every rate above; the residual to what Elo expected on the night separates
+# them. And the fall from a career peak, which no online rating can express.
+RES = ["d_surp5", "d_surp_all", "surp5_min", "surp5_max",
+       "d_peak_elo", "d_peak_gap", "d_worst_loss"]
+# How predictable is boxing HERE. Running, point-in-time upset rates by country,
+# promoter, division and distance — the model's own answer to "how much should a
+# rating gap be trusted on this kind of card", read off past bouts of that kind
+# and never off the price. home_fav is invariant on purpose: both of its factors
+# flip with the corners, so what survives is "the favourite is/is not at home".
+CTX = ["ctry_upset", "ctry_mae", "ctry_n", "promo_upset", "div_upset",
+       "sched_upset", "home_fav", "p_stop_hat", "d_elo_x_stop"]
+# COMPARABILITY and RECENCY. Every rating here is fitted on ONE graph covering
+# all of world boxing, but the graph is not connected: a Mexican club scene and
+# a British one exchange almost no results, so a 200-point gap across them is
+# not the same number as a 200-point gap inside one. same_ctry and venue_cos
+# say how comparable the two ratings are; elo_z_pop says where a rating sits
+# against the population actually active that month, which is what makes a
+# level meaningful across eras. And a man stopped last year is a different
+# fighter from the same record without that line in it.
+CMP = ["same_ctry", "venue_cos", "d_ko_loss_days", "koloss_min", "koloss_max",
+       "jm_min", "jm_max", "hidden_min", "hidden_max",
+       "elo_z_min", "elo_z_max", "d_elo_x_ctry", "d_gl_x_title"]
+# THIN RECORDS, where a fifth of the gap to the closing line lives. On the 3,288
+# quoted test bouts the market scores 0.1379 against our 0.2491 when the less
+# experienced man has fewer than three recorded bouts — 6% of the fights and 20%
+# of the whole deficit — because a debutant priced at 97% is an amateur
+# international and the corpus has never heard of him. What IS knowable is who
+# they put him in with and on what kind of card, and the _mm rule was throwing
+# exactly that away: one missing record NaN'd the pair, so the opponent's record
+# vanished in the only case where it was all we had.
+THIN = ["wrtrue_seen_min", "wrtrue_seen_max", "ntrue_seen_min", "ntrue_seen_max",
+        "hidden_seen_min", "hidden_seen_max",
+        "sched_thin", "opplvl_thin", "promo_thin", "card_thin"]
+# the three of the above that are fitted in bt_ratings, not in the replay loop
+BTX = ["bt8_min", "bt8_max", "d_bt_z"]
+
 TITLE_RUNG = {"other": 1.0, "regional": 1.0, "national": 2.0,
               "continental": 3.0, "international": 4.0, "world": 5.0}
 
 ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
+# the 2026-08-01 groups, always computable — they need no extra columns
+EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
@@ -146,6 +208,8 @@ EVERY_S = EVERY_W + SCORE
 EVERY_O = EVERY_S + OFF
 # …and what the saved event pages carried
 EVERY_C = EVERY_O + CARD
+# …and the levels, the uncertainty terms, the residuals and the context rates
+EVERY_X = EVERY_C + EXTRA
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -265,7 +329,7 @@ def bt_ratings(df: pd.DataFrame, taus=(2.0, 8.0), step_days: int = 30,
                   (df["winner_id"].astype(str).to_numpy()
                    == df["a"].astype(str).to_numpy()).astype(float))
 
-    out = {k: np.full(len(df), np.nan) for k in BT}
+    out = {k: np.full(len(df), np.nan) for k in BT + BTX}
     edges = np.arange(t[0] + step_days, t[-1] + step_days, step_days, dtype=np.float64)
 
     for tau in taus:
@@ -298,6 +362,15 @@ def bt_ratings(df: pd.DataFrame, taus=(2.0, 8.0), step_days: int = 30,
             if tau == taus[-1]:
                 out["btn_a"][sl] = np.log1p(nw[ia[sl]])
                 out["btn_b"][sl] = np.log1p(nw[ib[sl]])
+                # the LEVEL of the two whole-history ratings, not only the gap,
+                # and the gap divided by how much evidence stands behind it —
+                # the same standard error a paired t-test would use
+                ta, tb = theta[ia[sl]], theta[ib[sl]]
+                out["bt8_min"][sl] = np.minimum(ta, tb)
+                out["bt8_max"][sl] = np.maximum(ta, tb)
+                se = np.sqrt(1.0 / np.maximum(nw[ia[sl]], 1e-6)
+                             + 1.0 / np.maximum(nw[ib[sl]], 1e-6))
+                out["d_bt_z"][sl] = (ta - tb) / se
     return out
 
 
@@ -332,6 +405,40 @@ def _rate(num, den, default=0.0):
 
 def _mean(d: dict):
     return (d["s"] / d["n"]) if d["n"] else np.nan
+
+
+def _mm(x, y):
+    """(min, max) of the two corners, or (nan, nan) if either is unknown.
+
+    NaN must propagate rather than fall through to the known side: np.fmin
+    would quietly return the one value we have, and then "how much do we know
+    about this pair" would start naming a corner again — the mistake the age
+    group already made once."""
+    if x != x or y != y:
+        return (np.nan, np.nan)
+    return (x, y) if x <= y else (y, x)
+
+
+def _mm1(x, y):
+    """The same, but a single missing side is dropped instead of poisoning both.
+
+    _mm is the right default and it costs something real: when one man is
+    making his debut his BoxRec record does not exist, so the PAIR goes NaN and
+    the OPPONENT's record — the only thing anyone knows about a showcase debut —
+    is thrown away exactly where it is all there is. 20% of the gap to the
+    closing line sits on those 6% of bouts.
+
+    Dropping the missing side names no corner: "the record of whichever of the
+    two we know" is the same number read from either side of the ring, which is
+    precisely the test the age group failed."""
+    xa, xb = x == x, y == y
+    if xa and xb:
+        return (x, y) if x <= y else (y, x)
+    if xa:
+        return (x, x)
+    if xb:
+        return (y, y)
+    return (np.nan, np.nan)
 
 
 def dominance(sa: float, a_sc, b_sc, method: str, rf, sched) -> float:
@@ -419,6 +526,22 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     sched_stop = defaultdict(lambda: [0, 0])     # distance → [stoppages, bouts]
     glob = [0, 0]
     PSEUDO = 20.0
+    # ---- 2026-08-01 state
+    peak = defaultdict(lambda: ELO_INIT)         # highest rating ever reached
+    worst_loss: dict = {}                        # the weakest man he lost to
+    surp = defaultdict(lambda: deque(maxlen=5))  # result minus what Elo expected
+    surp_num, surp_den, surp_t = defaultdict(float), defaultdict(float), {}
+    # context → [bouts, upsets, Σ|result − Elo's forecast|]. How well ratings
+    # predict on this kind of card, read only off cards of that kind before it.
+    ctx = {k: defaultdict(lambda: [0, 0.0, 0.0])
+           for k in ("ctry", "promo", "div", "sched")}
+    ctx_glob = [0, 0.0, 0.0]
+    CTX_PSEUDO = 50.0
+    ko_loss_dates = defaultdict(list)            # when he was stopped, and how often
+    # the ratings of everyone who has boxed recently, so a rating can be placed
+    # against the population that was actually active rather than against 1500
+    pop = deque(maxlen=20000)
+    pop_stat = [1500.0, 100.0]                   # μ and σ, refreshed periodically
     card = df.groupby("event_slug")["a"].transform("size").to_numpy()
     has_w = "a_lbs" in df.columns
     has_s = "a_score" in df.columns
@@ -427,6 +550,33 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
 
     def _shrunk(k, n, prior):
         return (k + PSEUDO * prior) / (n + PSEUDO)
+
+    def _cos(da, db):
+        """Do these two men box in the same places? The cosine of their two
+        country histograms — 1.0 for two domestic fighters on a domestic card,
+        near 0 for two men whose ratings were earned in graphs that barely
+        touch, which is exactly when a rating difference means least."""
+        if not da or not db:
+            return np.nan
+        s = sum(da[k] * db[k] for k in (da.keys() & db.keys()))
+        if s == 0:
+            return 0.0
+        na_ = math.sqrt(sum(v * v for v in da.values()))
+        nb_ = math.sqrt(sum(v * v for v in db.values()))
+        return s / (na_ * nb_)
+
+    def _ctx_stat(kind, key):
+        """Upset rate and forecast error on this kind of card so far, shrunk
+        toward the running global rate so a country's third bout does not hand
+        the model a 0% upset rate."""
+        if key is None or key != key:
+            return (np.nan, np.nan, np.nan)
+        c = ctx[kind][key]
+        gu = ctx_glob[1] / ctx_glob[0] if ctx_glob[0] else 0.2
+        gm = ctx_glob[2] / ctx_glob[0] if ctx_glob[0] else 0.4
+        return ((c[1] + CTX_PSEUDO * gu) / (c[0] + CTX_PSEUDO),
+                (c[2] + CTX_PSEUDO * gm) / (c[0] + CTX_PSEUDO),
+                math.log1p(c[0]))
 
     _DEC = 3.0 * 365.25                              # half-life of "form", in days
 
@@ -589,6 +739,97 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 float(bool(rid) and bool(panel)),
             )
 
+        # ---- 2026-08-01: levels, uncertainty, residuals, context ------------
+        # every one of these is either invariant under swapping the corners
+        # (min, max, a standard deviation, a rate of the card) or antisymmetric
+        # (a difference, or a product of two things that both flip), so none of
+        # them can name a corner the way the age group did.
+        wr_a_, wr_b_ = _rate(wins[a], na, 0.5), _rate(wins[b], nb, 0.5)
+        wrt_a = (wa / tba) if (tba == tba and tba) else np.nan
+        wrt_b = (wb / tbb) if (tbb == tbb and tbb) else np.nan
+        sos_a_ = _rate(sos_sum[a], na, ELO_INIT)
+        sos_b_ = _rate(sos_sum[b], nb, ELO_INIT)
+        car_a = (r.dt - first[a]).days if a in first else 0
+        car_b = (r.dt - first[b]).days if b in first else 0
+        sm_a = sched_max[a] if sched_n[a] else np.nan
+        sm_b = sched_max[b] if sched_n[b] else np.nan
+        o3a = float(np.mean(opp3[a])) if opp3[a] else np.nan
+        o3b = float(np.mean(opp3[b])) if opp3[b] else np.nan
+        s5a = float(np.mean(surp[a])) if surp[a] else np.nan
+        s5b = float(np.mean(surp[b])) if surp[b] else np.nan
+        exp_elo = 1.0 / (1.0 + 10 ** ((eb - ea) / 400.0))
+
+        elo_mn, elo_mx = _mm(ea, eb)
+        gl_mn, gl_mx = _mm(ga, gb)
+        rd_mn, rd_mx = _mm(rda, rdb)
+        n_mn, n_mx = _mm(float(na), float(nb))
+        nt_mn, nt_mx = _mm(tba, tbb)
+        car_mn, car_mx = _mm(float(car_a), float(car_b))
+        sm_mn, sm_mx = _mm(sm_a, sm_b)
+        pk_mn, pk_mx = _mm(peak[a], peak[b])
+        wr_mn, wr_mx = _mm(wr_a_, wr_b_)
+        wrt_mn, wrt_mx = _mm(wrt_a, wrt_b)
+        ko_mn, ko_mx = _mm(_rate(ko[a], na, np.nan), _rate(ko[b], nb, np.nan))
+        kd_mn, kd_mx = _mm(_rate(koed[a], na, np.nan), _rate(koed[b], nb, np.nan))
+        di_mn, di_mx = _mm(_rate(dist_n[a], na, np.nan), _rate(dist_n[b], nb, np.nan))
+        so_mn, so_mx = _mm(sos_a_, sos_b_)
+        ow_mn, ow_mx = _mm(_mean(opp_wr[a]), _mean(opp_wr[b]))
+        og_mn, og_mx = _mm(_mean(opp_gl[a]), _mean(opp_gl[b]))
+        b3_mn, b3_mx = _mm(float(b365a), float(b365b))
+        mi_mn, mi_mx = _mm(math.log1p(mile[a]), math.log1p(mile[b]))
+        o3_mn, o3_mx = _mm(o3a, o3b)
+        s5_mn, s5_mx = _mm(s5a, s5b)
+
+        phi2 = (rda * rda + rdb * rdb) / (_Q * _Q)
+        glicko_e = 1.0 / (1.0 + math.exp(-max(min(
+            _g(math.sqrt(phi2)) * (ga - gb) / _Q, 30.0), -30.0)))
+        rd_norm = math.sqrt(rda * rda + rdb * rdb)
+        gaps = [(ea - eb) / 400.0, (ga - gb) / 400.0,
+                (elo_mov[a] - elo_mov[b]) / 400.0,
+                (elo_slow[a] - elo_slow[b]) / 400.0]
+        p_stop_hat = min(max(0.5 * (_rate(ko[a], na, 0.35) + _rate(koed[b], nb, 0.35)
+                                    + _rate(ko[b], nb, 0.35) + _rate(koed[a], na, 0.35)),
+                             0.0), 1.0)
+        cu, cm, cn_ = _ctx_stat("ctry", r.country)
+        pu, _, _ = _ctx_stat("promo", r.promoter)
+        du, _, _ = _ctx_stat("div", r.div)
+        su, _, _ = _ctx_stat("sched", sched)
+
+        # ---- CMP: how comparable are the two ratings, and how recent is the
+        # damage. Recomputing μ/σ of the active population from the window
+        # rather than carrying running sums: the variance is a difference of
+        # two numbers near 2.25e6 and the cancellation would eat it.
+        if i % 2000 == 0 and len(pop) >= 100:
+            arr = np.fromiter(pop, dtype=float, count=len(pop))
+            pop_stat[0] = float(arr.mean())
+            pop_stat[1] = float(max(arr.std(), 1e-6))
+        ac_, bc_ = getattr(r, "a_ctry", None), getattr(r, "b_ctry", None)
+        same_ctry = (float(ac_ == bc_) if isinstance(ac_, str) and isinstance(bc_, str)
+                     else np.nan)
+        kla = (r.dt - ko_loss_dates[a][-1]).days if ko_loss_dates[a] else 3000
+        klb = (r.dt - ko_loss_dates[b][-1]).days if ko_loss_dates[b] else 3000
+        kl_mn, kl_mx = _mm(float(sum(1 for d in ko_loss_dates[a] if (r.dt - d).days <= 730)),
+                           float(sum(1 for d in ko_loss_dates[b] if (r.dt - d).days <= 730)))
+        jm_mn, jm_mx = _mm(b365a * (1.0 - wr_a_), b365b * (1.0 - wr_b_))
+        hd_mn, hd_mx = _mm(tba - na if tba == tba else np.nan,
+                           tbb - nb if tbb == tbb else np.nan)
+        ez_mn, ez_mx = _mm((ea - pop_stat[0]) / pop_stat[1],
+                           (eb - pop_stat[0]) / pop_stat[1])
+        _tl = getattr(r, "title_level", None)
+        t_rung = TITLE_RUNG.get(_tl, 0.0) if isinstance(_tl, str) else np.nan
+
+        # ---- THIN: what is knowable about a man with no record — which is
+        # everything about the man opposite him and the card he is on
+        wts_mn, wts_mx = _mm1(wrt_a, wrt_b)
+        nts_mn, nts_mx = _mm1(tba, tbb)
+        hds_mn, hds_mx = _mm1(tba - na if tba == tba else np.nan,
+                              tbb - nb if tbb == tbb else np.nan)
+        thin = (na == 0) or (nb == 0)
+        sched_thin = sched if thin else np.nan
+        opplvl_thin = gl_mx if thin else np.nan
+        promo_thin = (float(promo_n[r.promoter]) if (thin and r.promoter) else np.nan)
+        card_thin = float(card[i]) if thin else np.nan
+
         rows.append((
             # ---- BASE
             ea - eb, na - nb,
@@ -676,6 +917,41 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             *off,
             # ---- CARD (absent unless the event pages were re-parsed)
             *crd,
+            # ---- LVLR: the level of the two ratings, not only the gap
+            elo_mn, elo_mx, gl_mn, gl_mx, rd_mn, rd_mx, n_mn, n_mx,
+            nt_mn, nt_mx, car_mn, car_mx, sm_mn, sm_mx, pk_mn, pk_mx,
+            # ---- LVLQ: the level of the rates (bt8_min/max come from
+            # bt_ratings and are merged after the loop)
+            wr_mn, wr_mx, wrt_mn, wrt_mx, ko_mn, ko_mx, kd_mn, kd_mx,
+            di_mn, di_mx, so_mn, so_mx, ow_mn, ow_mx, og_mn, og_mx,
+            b3_mn, b3_mx, mi_mn, mi_mx, o3_mn, o3_mx,
+            # ---- UNC (d_bt_z comes from bt_ratings)
+            glicko_e,
+            (ga - gb) / rd_norm if rd_norm > 0 else np.nan,
+            (ea - eb) / (rda + rdb) * 100.0 if (rda + rdb) > 0 else np.nan,
+            (ea - sos_a_) - (eb - sos_b_),
+            float(np.std(gaps)),
+            (ea - eb) * (elo_mn - ELO_INIT) / 400.0,
+            (ga - gb) * (sched / 12.0) if sched == sched else np.nan,
+            # ---- RES
+            s5a - s5b,
+            ((surp_num[a] / surp_den[a]) if surp_den[a] > 0 else np.nan)
+            - ((surp_num[b] / surp_den[b]) if surp_den[b] > 0 else np.nan),
+            s5_mn, s5_mx,
+            peak[a] - peak[b], (peak[a] - ea) - (peak[b] - eb),
+            worst_loss.get(a, 2200.0) - worst_loss.get(b, 2200.0),
+            # ---- CTX
+            cu, cm, cn_, pu, du, su,
+            (d_home_true * math.tanh((ea - eb) / 200.0)
+             if d_home_true == d_home_true else np.nan),
+            p_stop_hat, (ea - eb) * p_stop_hat,
+            # ---- CMP
+            same_ctry, _cos(ctry[a], ctry[b]), float(kla - klb),
+            kl_mn, kl_mx, jm_mn, jm_mx, hd_mn, hd_mx, ez_mn, ez_mx,
+            (ea - eb) * cu, (ga - gb) * t_rung,
+            # ---- THIN
+            wts_mn, wts_mx, nts_mn, nts_mx, hds_mn, hds_mx,
+            sched_thin, opplvl_thin, promo_thin, card_thin,
         ))
 
         # ------------------------------------------------------------- update
@@ -687,9 +963,34 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         rounds = (float(rf) if rf is not None and not pd.isna(rf)
                   else (float(sched) if not np.isnan(sched) else np.nan))
 
-        exp = 1.0 / (1.0 + 10 ** ((eb - ea) / 400.0))
+        exp = exp_elo
         elo[a] = ea + ELO_K * (sa - exp)
         elo[b] = eb + ELO_K * ((1 - sa) - (1 - exp))
+        peak[a] = max(peak[a], elo[a]); peak[b] = max(peak[b], elo[b])
+        # what the ratings expected, against what happened. A 12-0 record built
+        # on nobody and a 9-3 record built on contenders look the same in every
+        # rate above; this is the number that separates them.
+        for x, s, ex in ((a, sa, exp), (b, 1.0 - sa, 1.0 - exp)):
+            surp[x].append(s - ex)
+            if x in surp_t:
+                k = math.exp(-(r.dt - surp_t[x]).days / _DEC)
+                surp_num[x] *= k; surp_den[x] *= k
+            surp_num[x] += s - ex; surp_den[x] += 1.0; surp_t[x] = r.dt
+        if sa <= 0.0:
+            worst_loss[a] = min(worst_loss.get(a, 1e9), eb)
+        if sa >= 1.0:
+            worst_loss[b] = min(worst_loss.get(b, 1e9), ea)
+        # how well the ratings did on this kind of card — strictly after the row
+        # is written, so a card never contributes to the rate that scores it
+        upset = float((sa >= 1.0 and ea < eb) or (sa <= 0.0 and eb < ea))
+        mae = abs(sa - exp)
+        ctx_glob[0] += 1; ctx_glob[1] += upset; ctx_glob[2] += mae
+        for kind, key in (("ctry", r.country), ("promo", r.promoter),
+                          ("div", r.div), ("sched", sched)):
+            if key is None or key != key:
+                continue
+            c = ctx[kind][key]
+            c[0] += 1; c[1] += upset; c[2] += mae
         # the same update with two other settings: a stoppage is stronger
         # evidence than a split decision, and a slow K remembers longer
         ema, emb = elo_mov[a], elo_mov[b]
@@ -734,11 +1035,13 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             if sa >= 1.0:
                 ko[a] += 1; koed[b] += 1
                 ko_adj[a] += chin_b; koed_adj[b] += pow_a
+                ko_loss_dates[b].append(r.dt)
                 if rounds == rounds and rounds <= 3:
                     ko_early[a] += 1
             elif sa <= 0.0:
                 ko[b] += 1; koed[a] += 1
                 ko_adj[b] += chin_a; koed_adj[a] += pow_b
+                ko_loss_dates[a].append(r.dt)
                 if rounds == rounds and rounds <= 3:
                     ko_early[b] += 1
         elif not no_verdict:
@@ -803,13 +1106,19 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                     sb_l = [float(x) for x in jb.split(",")]
                 except ValueError:
                     sa_l = sb_l = []
-                hi = a if ea >= eb else b        # the man the ratings preferred
+                # the man the ratings preferred — and when they preferred
+                # neither there is no such man, so the judge's "does he go with
+                # the favourite" rate must not be updated at all. `>=` made it
+                # fall through to corner A and the rate then depended on which
+                # way round the bout was written down.
+                hi = (a if ea > eb else b) if ea != eb else None
                 for p, xa, xb in zip(panel, sa_l, sb_l):
                     if xa == xb:
                         continue
                     picked = a if xa > xb else b
-                    p["n"] += 1
-                    p["fav"] += int(picked == hi)
+                    if hi is not None:
+                        p["n"] += 1
+                        p["fav"] += int(picked == hi)
                     if local is not None:
                         p["hn"] += 1
                         p["home"] += int(picked == local)
@@ -826,6 +1135,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 if tgt is not None:
                     tgt["s"] += v; tgt["n"] += 1
 
+        pop.append(ea); pop.append(eb)
         seen[a] += 1; seen[b] += 1
         wins[a] += sa >= 1.0; wins[b] += sa <= 0.0
         if sa <= 0.0: losses[a] += 1
@@ -844,14 +1154,21 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             ctry[a][r.country] += 1; ctry[b][r.country] += 1
         if r.promoter:
             promo[a][r.promoter] += 1; promo[b][r.promoter] += 1; promo_n[r.promoter] += 1
-        if r.city:
+        if r.city and ha != hb:
+            # only when there IS a local man. The tie used to fall through to
+            # "corner A", which made the whole feature depend on which way round
+            # the bout was written down — mirror_check.py caught it at 0.55 of
+            # relative error, and a bout entered the other way round got a
+            # different number for a quantity that is a fact about the city.
             city_n[r.city] += 1
-            city_home[r.city] += (sa >= 1.0) if ha >= hb else (sa <= 0.0)
+            city_home[r.city] += (sa >= 1.0) if ha > hb else (sa <= 0.0)
 
     full = EVERY
     if has_w:
         full = EVERY_C if has_c else (EVERY_O if has_o else (EVERY_S if has_s else EVERY_W))
-    out = pd.DataFrame(rows, columns=[c for c in full if c not in BT])
+    full = full + EXTRA
+    merged = set(BT) | set(BTX)
+    out = pd.DataFrame(rows, columns=[c for c in full if c not in merged])
     for k, v in bt_ratings(df).items():
         out[k] = v
     return out[full]

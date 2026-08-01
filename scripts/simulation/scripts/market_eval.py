@@ -4,16 +4,25 @@ Everything else is a knob on this. Feature sets, calibration population,
 training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
-The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: corpus 0.3432 /
-premium 0.2967 / -0.0398 against the close, measured 2026-08-01. Every one of
-them was a measurement — no calibration because isotonic on 29k club bouts cost
-0.003 on the quoted set, a six-year half-life and five seeds because each is
-worth about +0.0013, 63 leaves because a 500-trial search could not beat it.
-Run it bare to reproduce the headline; pass flags to ask a different question.
+The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with --tta,
+corpus 0.3346 / premium 0.2859 / -0.0260 against the close, measured 2026-08-01.
+Every one of them was a measurement — no calibration because isotonic on 29k
+club bouts cost 0.003 on the quoted set, a six-year half-life and five seeds
+because each is worth about +0.0013, 63 leaves because a 500-trial search could
+not beat it, and `everyx` because the 87 features added on 2026-08-01 are worth
++0.0025 on the confirmation half of the holdout.
 
-  ./venv/bin/python scripts/market_eval.py --blend
+  ./venv/bin/python scripts/market_eval.py --tta --blend        <- the headline
   ./venv/bin/python scripts/market_eval.py --feats everyc --drop ref --label no-ref
-  ./venv/bin/python scripts/market_eval.py --price open --blend --label open
+  ./venv/bin/python scripts/market_eval.py --tta --price open --blend --label open
+
+--tta is on the command line rather than on by default only because it needs the
+mirrored matrix, which is a second full replay the first time it is asked for.
+There is no reason not to pass it: it costs one extra forward pass and it is
+worth +0.0042 on the confirmation half, +0.0044 on the premium holdout and
++0.0061 on the quoted set, all with intervals clear of zero on five seeds.
+--mirror trains on both orientations as well and is worth a further +0.0016, at
+two and a half times the training time.
 """
 
 from __future__ import annotations
@@ -42,7 +51,9 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           "age": F.AGE, "level": F.LEVEL, "h2h": F.H2H, "dur": F.DUR,
           "form": F.FORM, "level2": F.LEVEL2, "elo2": F.ELO2, "bt": F.BT,
           "miss": F.MISS, "weigh": F.WEIGH, "score": F.SCORE, "off": F.OFF,
-          "ref": F.REF, "jud": F.JUD, "card": F.CARD}
+          "ref": F.REF, "jud": F.JUD, "card": F.CARD,
+          "lvlr": F.LVLR, "lvlq": F.LVLQ, "unc": F.UNC, "res": F.RES,
+          "ctx": F.CTX, "cmp": F.CMP, "thin": F.THIN, "extra": F.EXTRA}
 
 SETS = {
     "base": F.BASE,
@@ -52,6 +63,7 @@ SETS = {
     "everys": F.EVERY_S,  # …and the judges' cards on top of that
     "everyo": F.EVERY_O,  # …and the officials who worked the bout
     "everyc": F.EVERY_C,  # …and what the saved event pages carried
+    "everyx": F.EVERY_X,  # …and the levels, uncertainty, residuals and context
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
@@ -105,6 +117,27 @@ def build(tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     df.to_parquet(dc, index=False)
     feats.to_parquet(fc, index=False)
     return df, feats
+
+
+def build_mirror(tag: str, df: pd.DataFrame) -> pd.DataFrame:
+    """The same matrix with the two corners exchanged.
+
+    Not obtainable by negating columns: some are per-corner, some are ratios,
+    some are invariant, and one wrong sign is a silent bug that would look like
+    a feature. It is the same replay on the flipped frame — which is exact,
+    because every update in replay() treats the two corners alike.
+    """
+    fc = CACHE / f"featsmir_{tag}_v{F.FEATS_VERSION}.parquet"
+    if fc.exists():
+        return pd.read_parquet(fc)
+    out = df.copy()
+    for x, y in F.PAIRED:
+        if x in out.columns and y in out.columns:
+            out[[x, y]] = out[[y, x]].values
+    print(f"replaying the mirror of {len(df):,} bouts…", flush=True)
+    fm = F.replay(out)
+    fm.to_parquet(fc, index=False)
+    return fm
 
 
 def _same_man(x: str, y: str) -> bool:
@@ -295,7 +328,7 @@ def main() -> None:  # noqa: PLR0915
     from sklearn.metrics import accuracy_score, log_loss
 
     tag = arg("--tag", "card")
-    fset = arg("--feats", "everyc")
+    fset = arg("--feats", "everyx")
     calib = arg("--calib", "none")       # none | all | matched | aux | regime | quoted
     weight = arg("--weight", "none")     # none | quoted
     label = arg("--label", fset)
@@ -308,6 +341,7 @@ def main() -> None:  # noqa: PLR0915
         cols = [c for c in cols if c not in gone]
 
     df, feats = build(tag)
+    feats = feats.astype("float32")
     j = join_odds(df)
     print(f"[{label}] priced bouts with an outcome: {len(j):,} "
           f"({j['dt'].min().date()} → {j['dt'].max().date()}) · "
@@ -394,9 +428,30 @@ def main() -> None:  # noqa: PLR0915
         w_big = w_big * 0.5 ** (np.clip(yrs, 0, None) / hl)
     w = w_big
     cut = int(len(big) * 0.9)
-    dtr = lgb.Dataset(X.iloc[big[:cut]], label=y_big[:cut], weight=w[:cut])
-    dva = lgb.Dataset(X.iloc[big[cut:]], label=y_big[cut:], weight=w[cut:],
-                      reference=dtr)
+    # The mirror: the same bouts entered from the other corner. A boxing match
+    # has no A and no B, so the answer must not depend on which name was typed
+    # first — and a tree ensemble's does. Training on both orientations makes
+    # the model near-antisymmetric instead of merely trained on a symmetrised
+    # sample, and --tta averages the two answers at prediction time. Worth
+    # +0.0032 and +0.0022 respectively on the confirmation half, measured; the
+    # mirror of a training bout stays on the training side of the split, so it
+    # can never be validated against its own twin.
+    ft = int(arg("--finetune", "0"))
+    MIR = (build_mirror(tag, df)[cols].astype("float32")
+           if {"--tta", "--mirror"} & set(sys.argv) else None)
+    Xtr, ytr, wtr = X.iloc[big[:cut]], y_big[:cut], w[:cut]
+    Xva, yva, wva = X.iloc[big[cut:]], y_big[cut:], w[cut:]
+    if "--mirror" in sys.argv:
+        if ft:
+            raise SystemExit("--mirror and --finetune have not been made to "
+                             "agree about the premium row mask")
+        Xtr = pd.concat([Xtr, MIR.iloc[big[:cut]]], ignore_index=True)
+        ytr = np.concatenate([ytr, 1.0 - ytr]); wtr = np.concatenate([wtr, wtr])
+        Xva = pd.concat([Xva, MIR.iloc[big[cut:]]], ignore_index=True)
+        yva = np.concatenate([yva, 1.0 - yva]); wva = np.concatenate([wva, wva])
+        print(f"  зеркало: обучение на {len(Xtr):,} строках вместо {cut:,}")
+    dtr = lgb.Dataset(Xtr, label=ytr, weight=wtr)
+    dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr)
     params = {"objective": "binary", "metric": "binary_logloss",
               "learning_rate": float(arg("--lr", "0.03")),
               "num_leaves": int(arg("--leaves", "63")),
@@ -427,7 +482,6 @@ def main() -> None:  # noqa: PLR0915
     # Fine-tuning: keep the 291k bouts that taught it what a boxer is, then
     # carry on boosting at a low rate over the population the market prices.
     # Cheaper than choosing between the two, and it can be measured.
-    ft = int(arg("--finetune", "0"))
     if ft:
         pm_tr = prem_all[big[:cut]]
         pm_va = prem_all[big[cut:]]
@@ -448,6 +502,25 @@ def main() -> None:  # noqa: PLR0915
               + " ".join(f"{m.best_iteration}→{t.best_iteration}"
                          for m, t in zip(lgbs, tuned)))
         lgbs = tuned
+    if "--refit" in sys.argv:
+        # Early stopping spends the most recent tenth of the corpus on choosing
+        # a tree count and then never trains on it — and under a six-year
+        # half-life that tenth carries more weight than any other. Take the
+        # count it found, put the validation slice back, refit on everything.
+        # The count is scaled by 1/0.9 because the same number of passes now
+        # has that much more data to cross.
+        nr = max(int(round(np.mean([m.best_iteration for m in lgbs]) / 0.9)), 50)
+        Xa, ya, wa_ = X.iloc[big], y_big, w
+        if "--mirror" in sys.argv:
+            Xa = pd.concat([Xa, MIR.iloc[big]], ignore_index=True)
+            ya = np.concatenate([ya, 1.0 - ya]); wa_ = np.concatenate([wa_, wa_])
+        dall = lgb.Dataset(Xa, label=ya, weight=wa_)
+        lgbs = [lgb.train(dict(params, seed=42 + k, bagging_seed=42 + k,
+                               feature_fraction_seed=42 + k),
+                          dall, num_boost_round=nr) for k in range(n_seed)]
+        for m in lgbs:
+            m.best_iteration = nr
+        print(f"  переобучение на всех {len(big):,} боях, {nr} деревьев")
     mdl = lgbs[0]
     print(f"  trained on {len(big):,} bouts · {len(cols)} features · "
           f"{'+'.join(str(m.best_iteration) for m in lgbs)} trees"
@@ -481,10 +554,26 @@ def main() -> None:  # noqa: PLR0915
         print(f"  ensemble: {', '.join(n for n, _ in members)} "
               f"(catboost {cb.get_best_iteration()} trees)")
 
-    def predict(Z):
+    def _lg(Z):
         ps = [np.clip(fn(Z), 1e-6, 1 - 1e-6) for _, fn in members]
-        lg = np.mean([np.log(p / (1 - p)) for p in ps], axis=0)
-        return 1.0 / (1.0 + np.exp(-lg))
+        return np.mean([np.log(p / (1 - p)) for p in ps], axis=0)
+
+    def predict(Z):
+        return 1.0 / (1.0 + np.exp(-_lg(Z)))
+
+    def predict_rows(rows, fn=None):
+        """Predict named bouts rather than a matrix, so the same bouts can be
+        asked the other way round. The training data is symmetrised — a
+        deterministic half of the corpus is entered B-first — but the model
+        that comes out of it is not exactly antisymmetric: it will not answer
+        p and 1−p to the same fight described from the two corners. Averaging
+        the two logits cancels the half of that disagreement which is noise,
+        and costs one extra forward pass."""
+        g = fn or _lg
+        lg = g(X.iloc[rows])
+        if "--tta" in sys.argv:
+            lg = 0.5 * (lg - g(MIR.iloc[rows]))
+        return np.clip(1.0 / (1.0 + np.exp(-lg)), 1e-6, 1 - 1e-6)
 
     # An auxiliary model with an EARLIER cutoff. Its predictions on the window
     # between the two cutoffs are the only genuinely out-of-sample predictions
@@ -601,7 +690,7 @@ def main() -> None:  # noqa: PLR0915
             iso = IsotonicRegression(out_of_bounds="clip").fit(p_src, src_y)
             def cal(p, rows=None, iso=iso):
                 return iso.predict(p)
-    raw_te = predict(X.iloc[idx[te]])
+    raw_te = predict_rows(idx[te])
     p_mod = np.clip(cal(raw_te, idx[te]), 1e-4, 1 - 1e-4)
     print(f"  калибровка на {calib} (n={n_src:,}"
           f"{', platt' if '--platt' in sys.argv else ''}): "
@@ -615,7 +704,7 @@ def main() -> None:  # noqa: PLR0915
     # the price".
     post = (~df["is_draw"]).values & (df["dt"] > cutoff).values
     pidx = np.where(post)[0]
-    p_corp = np.clip(cal(predict(X.iloc[pidx]), pidx), 1e-4, 1 - 1e-4)
+    p_corp = np.clip(cal(predict_rows(pidx), pidx), 1e-4, 1 - 1e-4)
     y_corp = y_all[pidx]
     ll_corp = log_loss(y_corp, p_corp)
     print(f"  корпусный холдаут n={len(pidx):,}: log-loss {ll_corp:.4f} · "
