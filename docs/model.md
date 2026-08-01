@@ -294,9 +294,37 @@ like, and none of that is in any database.
    nothing but a cron entry, and it grows with the age of the model.
 2. **The yardstick.** proboxingodds.com's front page is a LIVE ten-book board
    including Polymarket and Kalshi — near-zero-margin prediction markets, a far
-   sharper benchmark than any historical close — and it exists only going
-   forward: nothing about it can be recovered after the fact. Forward capture is
-   at zero of five parts.
+   sharper benchmark than any historical close. Forward capture is at zero of
+   five parts.
+
+   **Correction, 2026-08-01: "nothing about it can be recovered after the fact"
+   was wrong, and it was wrong in the way that matters.** That is true of the
+   aggregated proboxingodds view, and it is NOT true of Polymarket, which is
+   the sharpest book on that board. Polymarket settles on Polygon, so every
+   trade is permanent public record. `prices-history` on the CLOB API returns
+   empty for a closed market and 400s on an explicit range, which is what makes
+   it look unrecoverable — but `data-api.polymarket.com/trades` paginates
+   through the whole on-chain log. Usyk–Fury 2 comes back complete: 6,971
+   trades from 2024-12-03, 3,004 of them before the bell, and the mean of the
+   last twenty is 0.506 for Usyk, who then won on points. That is a closing
+   line with no margin in it at all, reconstructed two years after the fact.
+
+   What it is worth is a separate question from whether it exists. There are
+   214 closed boxing events, 64 above $50k of volume, $198M in total — but the
+   volume is influencer boxing: Paul–Tyson and Paul–Joshua are $115M of it, and
+   the rest of the top twenty is crypto fight nights and prop markets on the
+   method. Strip the props, strip the celebrity cards, and deduplicate the two
+   framings of the same bout ("will Usyk beat Fury" and "will Fury beat Usyk"),
+   and the sanctioned-boxing set inside our test window is on the order of ten
+   to twenty-five fights. That cannot resolve 0.002 — the interval on twenty
+   bouts is wider than the entire gap being argued about.
+
+   It is still worth having, for a reason that is not statistical power. A
+   Polymarket price carries essentially no margin, so it settles the question
+   the de-vig can only argue about: on the fights where it exists, is the model
+   behind a *fair* consensus, or only behind a bookmaker's? And the same two
+   endpoints are the forward-capture pipeline, which means that part of the
+   plan now has a concrete target instead of a scraper against a front page.
 3. Not hyper-parameters. Re-checked on the real protocol: 63→31→127→255 leaves,
    lr 0.03→0.015, min_data 30→300, λ₂ 5→30, feature fraction 0.9→0.6 — the best
    of them is worth +0.0006 on the confirmation half and none has an interval
