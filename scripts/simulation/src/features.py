@@ -36,7 +36,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 10
+FEATS_VERSION = 11
 
 ELO_K, ELO_INIT = 32.0, 1500.0
 # division → its nominal pound limit; a real ordering beats a category code
@@ -123,6 +123,20 @@ SCORE = ["d_melo", "d_dom", "d_dom_win", "d_dom_loss", "d_dom3",
 # label for the kind of card he works, which the model already knows.
 REF = ["ref_stop", "ref_early", "ref_stop_res", "ref_n", "ref_home", "d_home_ref"]
 JUD = ["jud_home", "d_home_jud", "jud_fav", "d_elo_jud", "jud_n"]
+# JUDC. The same judge information, read off the CARD instead of the bout, and
+# the reason it exists is that JUD cannot be used at all: judge_ids is saved
+# only when the scorecards were published, and they are published when the bout
+# went to a decision. So the mere PRESENCE of a panel says the fight did not
+# end early — P(stoppage) 0.097 against 0.743 — which is a fact about the
+# result, not about the officials. leak_check.py now fails on it.
+#
+# Officials are assigned to a CARD before its first bell, so which of them
+# worked tonight is genuinely pre-bell, and it can be read from any bout on the
+# card whose scorecards survived. Measured on the corpus: the pool covers 72.8%
+# of bouts against the panel's 36.7%, and the availability skew collapses from
+# 0.647 to 0.045 — twice the coverage, and the leak gone.
+JUDC = ["judc_home", "d_home_judc", "judc_fav", "d_elo_judc", "judc_n",
+        "judc_known"]
 OFF = REF + JUD + ["off_known"]
 # What was on the saved event pages all along. Two of these fix things rather
 # than add them: the flags give the officials a REAL home fighter instead of
@@ -212,7 +226,7 @@ ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
 # the 2026-08-01 groups, always computable — they need no extra columns
-EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT
+EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT + JUDC
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
@@ -225,7 +239,21 @@ EVERY_C = EVERY_O + CARD
 # AMAT is computed (it is in EXTRA, so it is in the matrix) but deliberately NOT
 # in the default set: it was measured and it costs 0.0015 on the premium
 # holdout. `--feats everyx+amat` reproduces the negative result.
-EVERY_X = EVERY_C + LVLR + LVLQ + UNC + RES + CTX + CMP + THIN
+# …and the levels, the uncertainty terms, the residuals and the context rates.
+# AMAT is computed (it is in EXTRA, so it is in the matrix) but deliberately NOT
+# in the default set: it was measured and it costs 0.0015 on the premium
+# holdout. `--feats everyx+amat` reproduces the negative result.
+#
+# JUD and off_known are computed and quarantined for a harder reason: they are
+# post-bell. judge_ids exists only where the scorecards were published, so the
+# five judge columns and the flag together say the bout went to a decision —
+# P(stoppage) 0.097 against 0.743. Every number this project published before
+# 2026-08-02 was measured with them in. `--feats everyx+jud+offknown` puts them
+# back so the inflated figure can be reproduced on demand; JUDC replaces them
+# with the officials assigned to the CARD, which is settled before the bell.
+_POST_BELL = set(JUD) | {"off_known"}
+EVERY_X = ([c for c in EVERY_C if c not in _POST_BELL]
+           + LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + JUDC)
 
 
 # --------------------------------------------------------------------- Glicko-2
@@ -578,11 +606,46 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     pop = deque(maxlen=20000)
     pop_stat = [1500.0, 100.0]                   # μ and σ, refreshed periodically
     amat = amateur_index()
-    card = df.groupby("event_slug")["a"].transform("size").to_numpy()
+    # How many bouts were on this card. The groupby is only a card count when
+    # the slug is a real event: 24,918 rows (6.0%) carry the synthetic slug
+    # `boxrec-YYYY-MM-01` from the pre-2010 layer, where a whole MONTH with no
+    # day is collapsed onto the 1st, and there the groupby returns a month's
+    # bout count — mean 92.5 against 7.7 for a real card, maximum 264. That
+    # number then feeds card_size, card_pos and card_thin, the last of which
+    # exists for the thin-record population this layer is full of. Prefer the
+    # event page's own count; fall back to the groupby only for real slugs, and
+    # refuse to guess otherwise.
+    _grp = df.groupby("event_slug")["a"].transform("size").to_numpy(float)
+    _pseudo = df["event_slug"].astype(str).str.fullmatch(
+        r"boxrec-\d{4}-\d{2}-01").to_numpy()
+    # who officiated tonight, from every bout on the card whose cards survived
+    _pool: dict = {}
+    if "judge_ids" in df.columns and "event_slug" in df.columns:
+        for slug, jj in zip(df["event_slug"], df["judge_ids"]):
+            if isinstance(jj, str) and jj:
+                _pool.setdefault(slug, set()).update(jj.split(","))
+    card = np.where(_pseudo, np.nan, _grp)
+    if "card_n" in df.columns:
+        _cn = pd.to_numeric(df["card_n"], errors="coerce").to_numpy(float)
+        card = np.where(np.isfinite(_cn), _cn, card)
     has_w = "a_lbs" in df.columns
     has_s = "a_score" in df.columns
     has_o = "ref_id" in df.columns
     has_c = "a_ctry" in df.columns
+
+    def _key(v):
+        """A missing categorical is not a category.
+
+        The corpus stores country/city/promoter/ref_id as str, and itertuples
+        hands a missing one back as float nan — which is TRUTHY. Every guard
+        written `if r.promoter:` therefore passed on a missing value and
+        indexed the defaultdict with the nan key, pooling every such bout into
+        one pseudo-entity: 74,614 bouts under a single promoter, 80,460 under a
+        single referee, 29,050 under one country, 25,702 under one city. The
+        counters built on those keys (promo_bouts, ref_n, city_home_bias) then
+        ran away without bound on exactly the rows where the fact is unknown.
+        """
+        return v if isinstance(v, str) and v else None
 
     def _shrunk(k, n, prior):
         return (k + PSEUDO * prior) / (n + PSEUDO)
@@ -619,12 +682,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     rows = []
     for i, r in enumerate(df.itertuples(index=False)):
         a, b = r.a, r.b
+        ctry_k, promo_k = _key(r.country), _key(r.promoter)
+        city_k, ref_k = _key(r.city), _key(getattr(r, "ref_id", None))
         ea, eb = elo[a], elo[b]
         na, nb = seen[a], seen[b]
         ga, rda = gl.peek(a, r.dt)
         gb, rdb = gl.peek(b, r.dt)
-        ha = _rate(ctry[a][r.country], na) if r.country else 0.0
-        hb = _rate(ctry[b][r.country], nb) if r.country else 0.0
+        ha = _rate(ctry[a][ctry_k], na) if ctry_k else 0.0
+        hb = _rate(ctry[b][ctry_k], nb) if ctry_k else 0.0
         wlbs = DIV_LBS.get(r.div, np.nan)
 
         # BoxRec's own record on the night. It counts the career before our
@@ -751,7 +816,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         off = ()
         if has_o:
             g_stop = glob[0] / glob[1] if glob[1] else 0.35
-            rid = getattr(r, "ref_id", None)
+            rid = ref_k
             R = ref[rid] if rid else None
             jids = getattr(r, "judge_ids", None)
             panel = [jud[k] for k in jids.split(",")] if isinstance(jids, str) and jids else []
@@ -826,10 +891,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         p_stop_hat = min(max(0.5 * (_rate(ko[a], na, 0.35) + _rate(koed[b], nb, 0.35)
                                     + _rate(ko[b], nb, 0.35) + _rate(koed[a], na, 0.35)),
                              0.0), 1.0)
-        cu, cm, cn_ = _ctx_stat("ctry", r.country)
-        pu, _, _ = _ctx_stat("promo", r.promoter)
+        cu, cm, cn_ = _ctx_stat("ctry", ctry_k)
+        pu, _, _ = _ctx_stat("promo", promo_k)
         du, _, _ = _ctx_stat("div", r.div)
-        su, _, _ = _ctx_stat("sched", sched)
+        # a missing distance is one bucket, not one per row: `sched` is a float
+        # and NaN is neither identical nor equal to itself, so an unkeyed NaN
+        # opens a fresh dict entry on each of the 51,782 rows that carry it and
+        # the counter can never accumulate. -1 is what sched_stop already uses.
+        su, _, _ = _ctx_stat("sched", sched if sched == sched else -1)
 
         # ---- CMP: how comparable are the two ratings, and how recent is the
         # damage. Recomputing μ/σ of the active population from the window
@@ -863,7 +932,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         thin = (na == 0) or (nb == 0)
         sched_thin = sched if thin else np.nan
         opplvl_thin = gl_mx if thin else np.nan
-        promo_thin = (float(promo_n[r.promoter]) if (thin and r.promoter) else np.nan)
+        promo_thin = (float(promo_n[promo_k]) if (thin and promo_k) else np.nan)
         card_thin = float(card[i]) if thin else np.nan
 
         # ---- AMAT: only what was already on the record before this bell
@@ -881,15 +950,31 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         am_mn, am_mx = (am_a, am_b) if am_a <= am_b else (am_b, am_a)
         amn_mn, amn_mx = (amn_a, amn_b) if amn_a <= amn_b else (amn_b, amn_a)
 
+        # ---- JUDC: the officials assigned to this CARD. Unlike the panel that
+        # scored this bout, which is recorded only when there were scorecards,
+        # who worked tonight is settled before the first bell and is readable
+        # from any bout on the card whose cards survived. Their tendencies are
+        # still read strictly from bouts BEFORE this one — `jud` is updated
+        # after the row is written, exactly as the per-bout panel is.
+        cpool = [jud[k] for k in _pool.get(getattr(r, "event_slug", None), ())]
+        hhc = d_home_true if d_home_true == d_home_true else (
+            (ha - hb) if (ha != hb) else np.nan)
+
+        def _cp(key, hkey):
+            vals = [_shrunk(p[key], p[hkey], 0.5) for p in cpool if p[hkey]]
+            return float(np.mean(vals)) if vals else np.nan
+        jc_home = _cp("home", "hn")
+        jc_fav = _cp("fav", "n")
+
         rows.append((
             # ---- BASE
             ea - eb, na - nb,
             _rate(wins[a], na, 0.5) - _rate(wins[b], nb, 0.5),
             ((r.dt - last[a]).days if a in last else 400) - ((r.dt - last[b]).days if b in last else 400),
             na, nb, ha - hb,
-            (promo[a][r.promoter] - promo[b][r.promoter]) if r.promoter else 0,
-            promo_n[r.promoter] if r.promoter else 0,
-            (city_home[r.city] / city_n[r.city]) if (r.city and city_n[r.city] >= 20) else np.nan,
+            (promo[a][promo_k] - promo[b][promo_k]) if promo_k else 0,
+            promo_n[promo_k] if promo_k else 0,
+            (city_home[city_k] / city_n[city_k]) if (city_k and city_n[city_k] >= 20) else np.nan,
             sched,
             _rate(ko[a], na) - _rate(ko[b], nb),
             _rate(koed[a], na) - _rate(koed[b], nb),
@@ -1012,6 +1097,11 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             (np.nanmean([amy_a, amy_b])
              if (amy_a == amy_a or amy_b == amy_b) else np.nan),
             amn_mn, amn_mx,
+            # ---- JUDC: the card's officials, not the bout's panel
+            jc_home, hhc * (jc_home - 0.5) if hhc == hhc else np.nan,
+            jc_fav, math.tanh((ea - eb) / 200.0) * (jc_fav - 0.5),
+            np.log1p(np.mean([p["n"] for p in cpool])) if cpool else np.nan,
+            float(bool(cpool)),
         ))
 
         # ------------------------------------------------------------- update
@@ -1045,8 +1135,9 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         upset = float((sa >= 1.0 and ea < eb) or (sa <= 0.0 and eb < ea))
         mae = abs(sa - exp)
         ctx_glob[0] += 1; ctx_glob[1] += upset; ctx_glob[2] += mae
-        for kind, key in (("ctry", r.country), ("promo", r.promoter),
-                          ("div", r.div), ("sched", sched)):
+        for kind, key in (("ctry", ctry_k), ("promo", promo_k),
+                          ("div", r.div),
+                          ("sched", sched if sched == sched else -1)):
             if key is None or key != key:
                 continue
             c = ctx[kind][key]
@@ -1210,18 +1301,18 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         elo3[a].append(ea); elo3[b].append(eb)
         if not np.isnan(wlbs):
             last_weight[a] = last_weight[b] = wlbs
-        if r.country:
-            ctry[a][r.country] += 1; ctry[b][r.country] += 1
-        if r.promoter:
-            promo[a][r.promoter] += 1; promo[b][r.promoter] += 1; promo_n[r.promoter] += 1
-        if r.city and ha != hb:
+        if ctry_k:
+            ctry[a][ctry_k] += 1; ctry[b][ctry_k] += 1
+        if promo_k:
+            promo[a][promo_k] += 1; promo[b][promo_k] += 1; promo_n[promo_k] += 1
+        if city_k and ha != hb:
             # only when there IS a local man. The tie used to fall through to
             # "corner A", which made the whole feature depend on which way round
             # the bout was written down — mirror_check.py caught it at 0.55 of
             # relative error, and a bout entered the other way round got a
             # different number for a quantity that is a fact about the city.
-            city_n[r.city] += 1
-            city_home[r.city] += (sa >= 1.0) if ha > hb else (sa <= 0.0)
+            city_n[city_k] += 1
+            city_home[city_k] += (sa >= 1.0) if ha > hb else (sa <= 0.0)
 
     full = EVERY
     if has_w:

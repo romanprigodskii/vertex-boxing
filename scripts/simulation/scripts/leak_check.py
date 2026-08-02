@@ -36,6 +36,16 @@ def main() -> None:
     tag = sys.argv[1] if len(sys.argv) > 1 else "post-ingest"
     df = pd.read_parquet(CACHE / f"sym_{tag}.parquet")
     feats = pd.read_parquet(CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet")
+    # Score the columns the model actually uses. A column that is computed and
+    # quarantined — AMAT, and now the post-bell judge block — is not a leak, and
+    # a test that fails on something nobody trains on is a test nobody reads.
+    if "--all" not in sys.argv:
+        sys.path.insert(0, str(ROOT / "scripts" / "simulation" / "scripts"))
+        import market_eval as ME
+        use = [c for c in ME.resolve("everyx") if c in feats.columns]
+        print(f"scoring the default feature set: {len(use)} of "
+              f"{feats.shape[1]} columns (--all for every column)\n")
+        feats = feats[use]
     y = F.label(df)
     nd = (~df["is_draw"]).to_numpy()
     y, feats = y[nd], feats[nd].reset_index(drop=True)
@@ -85,6 +95,53 @@ def main() -> None:
     for c, share, p1, p0 in sorted(rows, key=lambda r: -abs(r[2] - r[3]))[:14]:
         print(f"  {c:16s} missing {share:5.1%}  P(A|missing)={p1:.4f}  "
               f"P(A|present)={p0:.4f}  Δ={p1 - p0:+.4f}")
+
+    # ---------------------------------------------------------------- method
+    # The corner tests above cannot see the second shape of leak, because it
+    # names no corner. `off_known` was emitted as "the officials were assigned",
+    # which is pre-bell; but judge_ids is only saved when the SCORECARDS were
+    # published, and they are published when the bout went to a decision. So the
+    # flag and the NaN pattern of every JUD column say "this fight did not end
+    # early" — P(stoppage) 0.097 against 0.743 — and the model was reading how
+    # the fight ended before it started. It survived the corner tests because
+    # both corners lose the column together.
+    #
+    # The bar is set above the era layer and below the leak: whether a saved
+    # event page exists is a fact about the crawl too, but old bouts genuinely
+    # ended early more often, and that reaches 0.30.
+    meth = df["method"].astype(str).str.lower()[nd].reset_index(drop=True)
+    stop = meth.isin(["ko", "tko", "rtd"]).to_numpy()
+    dec = meth.isin(["ud", "sd", "md", "pts", "technical_decision"]).to_numpy()
+    known = stop | dec
+    print(f"\n--- does a feature say HOW the fight ended? "
+          f"({int(known.sum()):,} bouts with a known method, "
+          f"P(stoppage)={stop[known].mean():.4f}) ---")
+    bad = []
+    for c in feats.columns:
+        v = feats[c].to_numpy()
+        m = pd.isna(v)
+        cases = []
+        if 0 < m.mean() < 1:
+            cases.append(("missing", m))
+        vals = pd.unique(v[~m])
+        if 1 < len(vals) <= 3:          # a flag: split on its value, not its NaN
+            for u in sorted(vals):
+                cases.append((f"=={u:g}", (~m) & (v == u)))
+        for how, sel in cases:
+            g1, g0 = known & sel, known & ~sel
+            if g1.sum() < 200 or g0.sum() < 200:
+                continue
+            spread = abs(stop[g1].mean() - stop[g0].mean())
+            if spread > 0.20:
+                bad.append((spread, c, how, stop[g1].mean(), stop[g0].mean(),
+                            int(g1.sum())))
+    for spread, c, how, p1, p0, n1 in sorted(bad, reverse=True)[:12]:
+        flag = "  <-- POST-FIGHT" if spread > 0.45 else ""
+        print(f"  {c:16s} {how:9s} n={n1:7,}  P(stop|yes)={p1:.4f}  "
+              f"P(stop|no)={p0:.4f}  Δ={spread:.4f}{flag}")
+    top = max((b[0] for b in bad), default=0.0)
+    print(f"  worst: {top:.4f}"
+          f"{'  <-- FAIL' if top > 0.45 else '  ok (era effects only)'}")
 
     print("\n--- single features that alone separate the corners too well ---")
     # A rating gap of 400 points SHOULD predict 97%, so the bar is set where no

@@ -5,8 +5,17 @@ training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
 The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with
---tta --mirror, corpus 0.3325 / premium 0.2845 / -0.0255 against the close and a
-blend of +0.0045 [+0.0024, +0.0066], measured 2026-08-01.
+--tta --mirror --xt, corpus 0.3346 / premium 0.2848 / -0.0240 against the close
+and a blend of +0.0040 [+0.0022, +0.0059], measured 2026-08-02 on feature
+version 11.
+
+Those are WORSE on the corpus than the 0.3325 published on 2026-08-01 and BETTER
+against the market, because the earlier number contained a post-bell leak.
+`judge_ids` is saved only where the scorecards were published, i.e. where the
+bout went to a decision, so off_known and the NaN pattern of the five JUD columns
+told the model how the fight ended: P(stoppage) 0.097 against 0.743. It is out of
+`everyx` now — `--feats everyx+jud+offknown` puts it back and reproduces the old
+figure. See docs/status.md section 0, and leak_check.py, which fails on it.
 Every one of them was a measurement — no calibration because isotonic on 29k
 club bouts cost 0.003 on the quoted set, a six-year half-life and five seeds
 because each is worth about +0.0013, 63 leaves because a 500-trial search could
@@ -37,6 +46,7 @@ walk-tta` measures it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -53,6 +63,17 @@ from src import features as F  # noqa: E402
 _ODDS_V2 = ROOT / "imports" / "staging" / "proboxingodds_v2.parquet"
 _ODDS_V1 = ROOT / "imports" / "staging" / "proboxingodds.parquet"
 ODDS = _ODDS_V2 if _ODDS_V2.exists() else _ODDS_V1
+# A second odds feed changes the quoted set, and the quoted set is the
+# scoreboard — so switching to the merged file (odds_merge.py) has to be a
+# decision someone makes, not a file appearing on disk. Every saved run in
+# imports/staging/preds/ was scored against the default; a silent switch would
+# make those npz files un-comparable to new ones without anything looking wrong.
+#   VERTEX_ODDS=all   the merge of every source under odds_external/
+#   VERTEX_ODDS=<path>  any specific file
+if _sel := os.environ.get("VERTEX_ODDS"):
+    ODDS = (ROOT / "imports" / "staging" / "odds_all.parquet"
+            if _sel == "all" else Path(_sel))
+    print(f"  odds feed overridden: {ODDS.name}", flush=True)
 CACHE = ROOT / "imports" / "staging"
 _PAREN = re.compile(r"\[.*?\]|\(.*?\)")
 
@@ -65,7 +86,17 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           "ctx": F.CTX, "cmp": F.CMP, "thin": F.THIN, "amat": F.AMAT,
           # the amateur group's single strongest column, kept so the negative
           # result can be reproduced one feature at a time
-          "amat1": ["d_am"], "extra": F.EXTRA}
+          "amat1": ["d_am"], "extra": F.EXTRA,
+          # off_known is NOT a fact about the officials, it is a fact about how
+          # the fight ended: judge_ids is saved only when the scorecards were
+          # published, which happens when the bout went to a decision. Measured
+          # on the corpus: P(stoppage | off_known=1) = 0.097 against 0.743 the
+          # other way. Its own group so the leak can be dropped with `jud`.
+          "offknown": ["off_known"],
+          # the legitimate replacement for `jud`: the card's officials, not the
+          # bout's panel. Computed but deliberately outside everyx until it has
+          # been measured, exactly as the amateur group was.
+          "judc": F.JUDC}
 
 SETS = {
     "base": F.BASE,
@@ -254,10 +285,17 @@ def join_odds(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
             hits = [h for h in by_name.get((nm, d0), []) if _same_man(h[1], other)]
             if len(hits) == 1:
                 ix, _, dt, is_a = hits[0]
-                extra.append({"index": ix, "pair": o.pair, "dt_o": o.dt,
+                # every price column the feed carries, not a hand-written four.
+                # Listing them by hand meant best_a/best_b were dropped on all
+                # 1,292 alias-recovered rows, so `--price best` silently ran on
+                # 2,787 quoted bouts instead of 3,288 — and because the 0.6
+                # quantile that sets the train/test cutoff is taken AFTER the
+                # price column decides which rows survive, it also shifted the
+                # cutoff by two weeks. A different scoreboard AND a different
+                # training window, from naming columns twice.
+                extra.append({**{c: getattr(o, c) for c in cars},
+                              "index": ix, "pair": o.pair, "dt_o": o.dt,
                               "swap": (nm == o.na) != is_a,
-                              "close_a": o.close_a, "close_b": o.close_b,
-                              "open_a": o.open_a, "open_b": o.open_b,
                               "gap": abs((dt - o.dt).days)})
                 break
     if extra:
@@ -280,22 +318,35 @@ def devig(pa: np.ndarray, pb: np.ndarray, how: str) -> np.ndarray:
 
     The choice is NOT cosmetic. Proportional splits the margin in proportion to
     the price, which is the most generous reading of a favourite's number;
-    power and Shin both assume the book loads more margin onto the longshot,
-    and both make the market look BETTER than proportional does (0.361-0.367
-    against 0.376 here). Anything claimed about beating the close has to
-    survive all of them.
+    power assumes the book loads more margin onto the longshot, and makes the
+    market look BETTER than proportional does (0.361-0.367 against 0.376 here).
+    Anything claimed about beating the close has to survive all of them.
+
+    SHIN IS NOT A FOURTH METHOD ON A TWO-WAY BOOK. Writing u = 2(1-t)p + t, the
+    condition p_a + p_b = 1 gives u_a + u_b = 2, and u_a^2 - u_b^2 =
+    4(1-t)(q_a^2 - q_b^2)/PI, which is 4(1-t)(q_a - q_b) exactly because
+    PI = q_a + q_b for two outcomes. So u_a = 1 + (1-t)(q_a - q_b) and
+    p_a = q_a - (PI-1)/2 — the additive rule, whatever root the solver finds.
+    Verified to 1.7e-13 on all 22,052 sane closing books.
+
+    THE BRACKET. A best-of-ten-books line legitimately sums to less than 1, and
+    there the power equation has its root at k < 1. Bracketing from 1.0 made
+    brentq raise, the handler set k = 1.0, and `power` then returned the RAW
+    VIGGED probability — a pair summing to 0.95 rather than to 1, which is not
+    a fair probability at all. Never fires on the closing price; fired on 206 of
+    2,787 best-price rows.
     """
     s = pa + pb
     if how == "proportional":
         return pa / s
-    if how == "additive":
+    if how in ("additive", "shin"):
         return np.clip(pa - (s - 1) / 2, 1e-4, 1 - 1e-4)
     from scipy.optimize import brentq
     out = np.empty_like(pa)
     for i, (x, z) in enumerate(zip(pa, pb)):
         if how == "power":
             try:
-                k = brentq(lambda k: x ** k + z ** k - 1.0, 1.0, 400.0)
+                k = brentq(lambda k: x ** k + z ** k - 1.0, 0.02, 400.0)
             except ValueError:
                 k = 1.0
             out[i] = x ** k
@@ -462,8 +513,6 @@ def main() -> None:  # noqa: PLR0915
         Xva = pd.concat([Xva, MIR.iloc[big[cut:]]], ignore_index=True)
         yva = np.concatenate([yva, 1.0 - yva]); wva = np.concatenate([wva, wva])
         print(f"  зеркало: обучение на {len(Xtr):,} строках вместо {cut:,}")
-    dtr = lgb.Dataset(Xtr, label=ytr, weight=wtr)
-    dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr)
     params = {"objective": "binary", "metric": "binary_logloss",
               "learning_rate": float(arg("--lr", "0.03")),
               "num_leaves": int(arg("--leaves", "63")),
@@ -472,6 +521,15 @@ def main() -> None:  # noqa: PLR0915
               "bagging_fraction": float(arg("--bf", "0.9")), "bagging_freq": 5,
               "lambda_l2": float(arg("--l2", "5.0")),
               "verbosity": -1, "seed": 42}
+    if "--xt" in sys.argv:
+        # Extremely randomised splits: the threshold is drawn rather than
+        # optimised, which under-fits each tree and decorrelates the ensemble.
+        # The only regulariser on this problem that paid — see lab.py.
+        params["extra_trees"] = True
+    # The params must reach the Dataset and not only lgb.train. min_data_in_leaf
+    # drives LightGBM's feature pre-filter at BINNING time, so leaving it out
+    # bound the matrix at the default 20 while training was told 100 — two
+    # different models from one declared number.
     if "--mono" in sys.argv:
         # A higher rating cannot make a man less likely to win. Trees do not
         # know that and will happily carve a non-monotone step out of noise in
@@ -480,6 +538,9 @@ def main() -> None:  # noqa: PLR0915
         RATINGS = {"d_elo", "d_glicko", "d_glicko_cons", "d_bt2", "d_bt8",
                    "d_elo_mov", "d_elo_slow"}
         params["monotone_constraints"] = [1 if c in RATINGS else 0 for c in cols]
+    # every flag must be settled before the matrix is binned
+    dtr = lgb.Dataset(Xtr, label=ytr, weight=wtr, params=params)
+    dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr, params=params)
     # Seed bagging: one tree ensemble is itself a sample, and averaging a few
     # of them in logit space removes variance that early stopping cannot.
     n_seed = int(arg("--seeds", "5"))
@@ -526,7 +587,7 @@ def main() -> None:  # noqa: PLR0915
         if "--mirror" in sys.argv:
             Xa = pd.concat([Xa, MIR.iloc[big]], ignore_index=True)
             ya = np.concatenate([ya, 1.0 - ya]); wa_ = np.concatenate([wa_, wa_])
-        dall = lgb.Dataset(Xa, label=ya, weight=wa_)
+        dall = lgb.Dataset(Xa, label=ya, weight=wa_, params=params)
         lgbs = [lgb.train(dict(params, seed=42 + k, bagging_seed=42 + k,
                                feature_fraction_seed=42 + k),
                           dall, num_boost_round=nr) for k in range(n_seed)]

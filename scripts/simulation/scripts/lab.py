@@ -77,6 +77,107 @@ def mirror_feats(tag: str, df: pd.DataFrame) -> pd.DataFrame:
     return fm
 
 
+# ------------------------------------------------- the axes a tree cannot build
+# Twenty of the 200 columns reach the model as a PAIR — one number per corner —
+# rather than as a difference. Verified against the mirror matrix on all 413,279
+# rows: 82 columns negate under a corner swap, 96 are invariant, two go to 1-x,
+# and exactly these ten pairs swap with each other.
+#
+# A boosting tree splits on one column at a time, so it can never form x_a - x_b
+# on its own; it approximates the diagonal with a staircase and spends depth
+# doing it. Four of the ten already have an exact difference column elsewhere in
+# the matrix (d_bouts, d_bouts_true, d_age, d_over) — the other six do not, and
+# for those the model has no antisymmetric axis at all.
+#
+# The sum is added too: it is the corner-invariant half of the same rotation and
+# says "how much of this quantity is in the ring", which min/max covers for two
+# of the pairs and for none of the rest. Both are exactly mirror-consistent by
+# construction — computed with the same expression on the mirrored frame, the
+# sum is unchanged and the difference negates.
+PAIRS = [("n_a", "n_b", "nb", True), ("n_true_a", "n_true_b", "ntrue", True),
+         ("age_a", "age_b", "age", True), ("over_a", "over_b", "over", True),
+         ("lay_a", "lay_b", "lay", False),
+         ("a_unbeaten", "b_unbeaten", "unb", False),
+         ("rd_a", "rd_b", "rd", False), ("stepup_a", "stepup_b", "step", False),
+         ("btn_a", "btn_b", "btn", False), ("dom_n_a", "dom_n_b", "domn", False)]
+
+
+def ensure_rot(B) -> list[str]:
+    """Add (x_a - x_b, x_a + x_b) for every per-corner pair. Returns the names."""
+    names: list[str] = []
+    for xa, xb, stem, has_diff in PAIRS:
+        if xa not in B.feats.columns or xb not in B.feats.columns:
+            continue
+        cs, cd = f"{stem}_sum", f"{stem}_dif"
+        for frame in (B.feats, B.mir):
+            a = frame[xa].to_numpy("float32")
+            b = frame[xb].to_numpy("float32")
+            if cs not in frame.columns:
+                frame[cs] = a + b
+            if not has_diff and cd not in frame.columns:
+                frame[cd] = a - b
+        names.append(cs)
+        if not has_diff:
+            names.append(cd)
+    return names
+
+
+# ------------------------------------------------------------- a graded target
+def soft_label(B, rows: np.ndarray, y: np.ndarray, alpha: float) -> np.ndarray:
+    """The win/loss bit, graded by how decisive the win was.
+
+    Every rating in src/features.py reads one bit per bout — Elo, Glicko and
+    Bradley-Terry all see a win as a win — and features.py says so itself, which
+    is why d_melo exists. The BOOSTING TARGET still reads one bit. The judges
+    hand out a graded number on 144,337 bouts and the referee's stopping round
+    grades 267,000 more, and none of it reaches the objective. A split decision
+    over ten rounds is weaker evidence that A is the better fighter than a
+    first-round knockout, and a 0/1 label says the two are identical evidence.
+
+    tau in [0,1] is decisiveness; the label is (1-alpha)*y + alpha*(0.5 +
+    0.5*tau signed by the winner), so alpha=0 is exactly the current target and
+    the rung above it is a strict generalisation.
+
+    The result is NOT a probability, and a model fitted to it is not calibrated.
+    It is a monotone transform of one, which a two-parameter logistic fit on the
+    validation slice undoes. That is not the calibration that status.md killed —
+    that one re-calibrated an already-calibrated model and had nothing to do;
+    this one is required by construction.
+    """
+    d = B.df.iloc[rows]
+    meth = d["method"].astype(str).str.lower().to_numpy()
+    rnd = pd.to_numeric(d["round_finished"], errors="coerce").to_numpy(float)
+    sch = pd.to_numeric(d["sched"], errors="coerce").to_numpy(float)
+    sa = pd.to_numeric(d["a_score"], errors="coerce").to_numpy(float)
+    sb = pd.to_numeric(d["b_score"], errors="coerce").to_numpy(float)
+    sch = np.where(np.isfinite(sch) & (sch > 0), sch, 10.0)
+
+    # unknown method: the corpus mean decisiveness, so it neither sharpens nor
+    # flattens a bout we know nothing about
+    tau = np.full(len(rows), 0.55)
+    stop = np.isin(meth, ["ko", "tko", "rtd"])
+    # a stoppage is decisive, and the earlier it came the more decisive it was
+    tau = np.where(stop, 0.90 - 0.30 * np.clip(rnd / sch, 0, 1), tau)
+    tau = np.where(stop & ~np.isfinite(rnd), 0.75, tau)
+    # a decision with the cards on it grades itself: points per scheduled round,
+    # where a 10-9 sweep is 1.0 and anything past 1.5 is a shutout
+    tot = sa + sb
+    marg = np.where(np.isfinite(tot) & (tot > 0), 19.0 * np.abs(sa - sb) / tot, np.nan)
+    has = np.isfinite(marg)
+    dec = np.isin(meth, ["ud", "sd", "md", "pts", "technical_decision"])
+    tau = np.where(dec & has, np.clip(marg / 1.5, 0.05, 0.90), tau)
+    # a decision with no cards saved: the verdict itself is the only grade
+    tau = np.where(dec & ~has & (meth == "ud"), 0.55, tau)
+    tau = np.where(dec & ~has & np.isin(meth, ["sd", "md"]), 0.15, tau)
+    tau = np.where(dec & ~has & (meth == "pts"), 0.45, tau)
+    tau = np.where(dec & ~has & (meth == "technical_decision"), 0.30, tau)
+    # a disqualification says nothing about who was better
+    tau = np.where(np.isin(meth, ["dq", "nc"]), 0.0, tau)
+
+    graded = np.where(y > 0.5, 0.5 + 0.5 * tau, 0.5 - 0.5 * tau)
+    return np.clip((1.0 - alpha) * y + alpha * graded, 1e-4, 1 - 1e-4)
+
+
 # ------------------------------------------------------------------- the bench
 class Bench:
     def __init__(self, tag: str = "card", price: str = "close") -> None:
@@ -153,14 +254,37 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         halflife: float = 6.0, draws: bool = False, mirror_train: bool = False,
         tta: bool = False, weight: str = "none", params_over: dict | None = None,
         finetune: int = 0, refit: bool = False, valfrac: float = 0.1,
-        init_score: bool = False, seed0: int = 42):
-    """Train on everything up to `cutoff` and hand back a predictor."""
+        init_score: bool = False, seed0: int = 42, blend: str = "",
+        avg: str = "logit", soft: float = 0.0, shrink: bool = False):
+    """Train on everything up to `cutoff` and hand back a predictor.
+
+    `blend` adds a second model CLASS to the average rather than a second seed.
+    Seed bagging averages members that differ by accident; two learners with
+    different inductive biases disagree for a reason, and on a surface this
+    smooth — a rating gap deflated by how much the ratings are trusted — an
+    oblivious-tree learner and a leaf-wise one make different mistakes.
+      cat      LightGBM and CatBoost, equal weight per member
+      catonly  CatBoost alone, to see which half carries it
+
+    `avg` is how members are combined. Logit averaging is the geometric mean of
+    the odds and is what this bench has always done; it is sharper than the
+    members and can be over-confident. Probability averaging is the mixture,
+    and by Jensen its log-loss is at most the mean of the members'. Which one
+    wins is an empirical question nobody here has asked.
+    """
     import lightgbm as lgb
 
+    assert not (refit and blend), \
+        "refit rebuilds only the LightGBM members; the CatBoost half would be stale"
+    assert not (refit and soft > 0), \
+        "refit trains on iva, which the graded-target calibrator is fitted on"
     B = bench
     pre = B.dt <= np.datetime64(cutoff, "D")
     big = np.where(B.nd & pre)[0]
     y_big = B.y_all[big].astype(float)
+    if soft > 0:
+        assert not draws, "the graded target already says a draw is 0.5"
+        y_big = soft_label(B, big, y_big, soft)
     w_big = np.ones(len(big))
     if draws:
         d = np.where(B.df["is_draw"].to_numpy() & pre)[0]
@@ -222,6 +346,11 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
               "learning_rate": 0.03, "num_leaves": 63, "min_data_in_leaf": 100,
               "feature_fraction": 0.9, "bagging_fraction": 0.9, "bagging_freq": 5,
               "lambda_l2": 5.0, "verbosity": -1, "seed": seed0, "num_threads": 8}
+    if soft > 0:
+        # "binary" wants a 0/1 label; cross_entropy is the same loss written for
+        # a label anywhere in [0,1], which is what a graded outcome is
+        params["objective"] = "cross_entropy"
+        params["metric"] = "cross_entropy"
     params.update(params_over or {})
     # Glickman's own expected score as the starting point, so boosting only has
     # to learn what the ratings do NOT explain. Different from handing it over
@@ -239,23 +368,54 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         if mirror_train:
             z0tr = np.concatenate([z0tr, -z0tr])
             z0va = np.concatenate([z0va, -z0va])
-    dtr = lgb.Dataset(Xtr, label=ytr, weight=wtr,
+    # params must reach the Dataset, not only lgb.train: linear_tree, max_bin
+    # and min_data_in_bin are decided when the matrix is binned, and passing
+    # them later raises "Cannot change linear_tree after constructed Dataset
+    # handle". Without this the `lineartree` variant could never run at all —
+    # it is in the registry and has never once been measured.
+    dtr = lgb.Dataset(Xtr, label=ytr, weight=wtr, params=params,
                       init_score=z0tr if init_score else None)
-    dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr,
+    dva = lgb.Dataset(Xva, label=yva, weight=wva, reference=dtr, params=params,
                       init_score=z0va if init_score else None)
     # Bin now and drop our own copy. With --mirror the training frame is 612k
     # rows by 200 columns and it is held alongside the base matrix, the mirror,
     # and both of their column subsets — enough to put a 16GB machine into swap,
     # where a five-seed run stops looking slow and starts looking hung.
     dtr.construct(); dva.construct()
-    if not finetune:                 # the fine-tune path still reads the frames
+    if not finetune and not blend:   # these paths still read the frames
         del Xtr, Xva
     models = []
-    for k in range(seeds):
-        p = dict(params, seed=seed0 + k, bagging_seed=seed0 + k,
-                 feature_fraction_seed=seed0 + k)
-        models.append(lgb.train(p, dtr, num_boost_round=4000, valid_sets=[dva],
-                                callbacks=[lgb.early_stopping(150, verbose=False)]))
+    if blend != "catonly":
+        for k in range(seeds):
+            p = dict(params, seed=seed0 + k, bagging_seed=seed0 + k,
+                     feature_fraction_seed=seed0 + k)
+            models.append(lgb.train(p, dtr, num_boost_round=4000, valid_sets=[dva],
+                                    callbacks=[lgb.early_stopping(150, verbose=False)]))
+    cats = []
+    if blend:
+        # Symmetric oblivious trees: every node at a depth splits on the same
+        # feature, which is a much stronger regulariser than LightGBM's
+        # leaf-wise growth and fails differently. Depth 6 is CatBoost's own
+        # default and is not tuned here — tuning it would be a search, and the
+        # search on this problem has already been run and found nothing.
+        from catboost import CatBoostClassifier, Pool
+        # CatBoost's Logloss demands exactly two distinct label values and
+        # raises on a graded target; CrossEntropy is its documented objective
+        # for a label anywhere in [0,1], the exact counterpart of LightGBM's.
+        closs = "CrossEntropy" if soft > 0 else "Logloss"
+        ptr = Pool(Xtr, label=ytr, weight=wtr)
+        pva = Pool(Xva, label=yva, weight=wva)
+        for k in range(seeds):
+            c = CatBoostClassifier(iterations=4000, learning_rate=0.03, depth=6,
+                                   l2_leaf_reg=5.0, loss_function=closs,
+                                   random_seed=seed0 + k, thread_count=8,
+                                   od_type="Iter", od_wait=150, verbose=False,
+                                   allow_writing_files=False)
+            c.fit(ptr, eval_set=pva, use_best_model=True)
+            cats.append(c)
+        del ptr, pva
+        if not finetune:
+            del Xtr, Xva
     if finetune:
         pm_tr, pm_va = B.prem_all[itr], B.prem_all[iva]
         if mirror_train:
@@ -292,32 +452,88 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
             z0a = _z0(big)
             if mirror_train:
                 z0a = np.concatenate([z0a, -z0a])
-        dall = lgb.Dataset(Xa, label=ya, weight=wa_, init_score=z0a)
+        dall = lgb.Dataset(Xa, label=ya, weight=wa_, params=params, init_score=z0a)
         models = [lgb.train(dict(params, seed=seed0 + k, bagging_seed=seed0 + k,
                                  feature_fraction_seed=seed0 + k),
                             dall, num_boost_round=n) for k in range(seeds)]
         for m in models:
             m.best_iteration = n
 
-    def predict(rows: np.ndarray) -> np.ndarray:
-        def _p(Z):
-            ps = [np.clip(m.predict(Z, num_iteration=m.best_iteration), 1e-6, 1 - 1e-6)
-                  for m in models]
-            return np.mean([np.log(p / (1 - p)) for p in ps], axis=0)
-        lg = _p(X.iloc[rows])
+    def _p(Z):
+        ps = [np.clip(m.predict(Z, num_iteration=m.best_iteration), 1e-6, 1 - 1e-6)
+              for m in models]
+        ps += [np.clip(c.predict_proba(Z)[:, 1], 1e-6, 1 - 1e-6) for c in cats]
+        if avg == "prob":
+            q = np.clip(np.mean(ps, axis=0), 1e-6, 1 - 1e-6)
+            return np.log(q / (1 - q))
+        return np.mean([np.log(p / (1 - p)) for p in ps], axis=0)
+
+    def _orient(rows: np.ndarray):
+        """The bout asked both ways round. Returns (logit, mirror logit)."""
+        la = _p(X.iloc[rows])
         if init_score:
-            lg = lg + _z0(rows)          # the offset is not in Booster.predict
-        if tta:
-            # the same bout asked the other way round; the model is not exactly
-            # antisymmetric, and the half of the disagreement that is noise
-            # cancels
-            lgm = _p(X_mir.iloc[rows])
-            if init_score:
-                lgm = lgm + _z0(rows, mirror=True)
-            lg = 0.5 * (lg - lgm)
+            la = la + _z0(rows)          # the offset is not in Booster.predict
+        if not tta:
+            return la, None
+        lb = _p(X_mir.iloc[rows])
+        if init_score:
+            lb = lb + _z0(rows, mirror=True)
+        return la, lb
+
+    def _logit(rows: np.ndarray) -> np.ndarray:
+        la, lb = _orient(rows)
+        if lb is None:
+            return la
+        # the model is not exactly antisymmetric, and the half of the
+        # disagreement that is noise cancels in the average
+        av = 0.5 * (la - lb)
+        if shr is None:
+            return av
+        # …and the half that does not cancel is a free per-bout confidence
+        # signal that this bench currently throws away. |la + lb| is zero for a
+        # perfectly antisymmetric model, so where it is large the model's own
+        # answer depends on which man was typed first, and that logit deserves
+        # less weight. Fitted as one interaction term on the validation slice.
+        # NOT the global shrink status.md killed: an ORACLE global shrink was
+        # worth 0.0005 precisely because it is one number for every bout, and
+        # the diagnosis says the model is under-confident in some places and
+        # over-confident in others. This is per-bout and costs nothing to
+        # compute — TTA already evaluates both orientations.
+        return shr[0] * av + shr[1] * av * np.abs(la + lb)
+
+    # A model fitted to the graded target predicts E[graded], not P(win). Write
+    # p for P(A wins|x) and t(x) for how decisive this matchup tends to be, and
+    # the graded target's conditional mean is
+    #     0.5 + (p - 0.5) * ((1 - alpha) + alpha * t(x)),
+    # an affine map of p whose SLOPE moves with x. So a two-parameter logistic
+    # cannot undo it — the distortion is not global. It is still monotone in p
+    # (the slope is strictly positive, and t rises with the mismatch), so an
+    # isotonic fit is the right inverse and a logistic one is not. Fitted on the
+    # rows early stopping already used: the alternative is holding out a third
+    # slice from a window the half-life has already thinned.
+    shr = None
+    if tta and shrink:
+        from sklearn.linear_model import LogisticRegression
+        la, lb = _orient(iva)
+        av = 0.5 * (la - lb)
+        lr = LogisticRegression(C=1e6, max_iter=2000, fit_intercept=False).fit(
+            np.column_stack([av, av * np.abs(la + lb)]), B.y_all[iva].astype(int))
+        shr = (float(lr.coef_[0][0]), float(lr.coef_[0][1]))
+
+    cal = None
+    if soft > 0:
+        from sklearn.isotonic import IsotonicRegression
+        cal = IsotonicRegression(out_of_bounds="clip", y_min=1e-6, y_max=1 - 1e-6)
+        cal.fit(_logit(iva), B.y_all[iva].astype(float))
+
+    def predict(rows: np.ndarray) -> np.ndarray:
+        lg = _logit(rows)
+        if cal is not None:
+            return np.clip(cal.predict(lg), 1e-6, 1 - 1e-6)
         return np.clip(1 / (1 + np.exp(-lg)), 1e-6, 1 - 1e-6)
 
-    predict.n_trees = float(np.mean([m.best_iteration for m in models]))
+    predict.n_trees = float(np.mean([m.best_iteration for m in models]
+                                    or [c.tree_count_ for c in cats]))
     return predict
 
 
@@ -526,6 +742,86 @@ def main() -> None:
         "hl4": {"halflife": 4.0},
         "hl9": {"halflife": 9.0},
         "hl0": {"halflife": 0.0},
+        # a second model CLASS rather than a second seed. status.md lists
+        # "CatBoost/LogReg" as a dead end, but as a REPLACEMENT for LightGBM;
+        # nothing here has ever averaged the two, and two learners that fail
+        # differently are the one ensemble that is not just variance reduction.
+        "catonly": {"blend": "catonly"},
+        "cat": {"blend": "cat"},
+        "cat+tta": {"blend": "cat", "tta": True},
+        # how members are combined, which has been logit-averaging by default
+        # since the bench was written and was never measured against the mixture
+        "probavg": {"avg": "prob", "seeds": 3},
+        "logitavg": {"avg": "logit", "seeds": 3},
+        "cat-prob": {"blend": "cat", "avg": "prob"},
+        # the graded target: alpha=0 is exactly base, so this is a ladder and
+        # not a different model
+        "soft03": {"soft": 0.3},
+        "soft06": {"soft": 0.6},
+        "soft10": {"soft": 1.0},
+        "soft06+tta": {"soft": 0.6, "tta": True},
+        # The hyper-parameter search that found nothing swept leaves, learning
+        # rate, min_data, lambda_l2 and feature_fraction — the knobs that trade
+        # capacity for fit. These are a different class: they decorrelate the
+        # members or smooth the leaves, and extra_trees, the first one measured,
+        # is worth +0.0020 on the selection half. path_smooth in particular
+        # pulls a leaf's value toward its parent in proportion to how few rows
+        # reached it, which is aimed exactly at the thin-record slice where a
+        # fifth of the gap to the market lives.
+        "path10": {"params_over": {"path_smooth": 10.0}},
+        "path50": {"params_over": {"path_smooth": 50.0}},
+        "ffnode07": {"params_over": {"feature_fraction_bynode": 0.7}},
+        "bin511": {"params_over": {"max_bin": 511}},
+        "xt+path10": {"params_over": {"extra_trees": True, "path_smooth": 10.0}},
+        "xt+tta": {"params_over": {"extra_trees": True}, "tta": True},
+        "xt+ffnode": {"params_over": {"extra_trees": True,
+                                      "feature_fraction_bynode": 0.7}},
+        # the model's disagreement with itself under a corner swap, used as a
+        # per-bout weight on its own logit. Free: TTA already computes both.
+        "ttashrink": {"tta": True, "shrink": True},
+        "tta-plain": {"tta": True},
+        # THE LEAK. judge_ids is saved only when the scorecards were published,
+        # i.e. when the bout went to a decision, so off_known and the NaN
+        # pattern of every JUD column are post-bell facts. Measured on the
+        # corpus: P(stoppage | off_known=1) = 0.097 against 0.743. This variant
+        # is what the model would have scored knowing only what was knowable.
+        "noleak": {"feats": "everyx", "drop": "jud+offknown"},
+        "noleak+tta": {"feats": "everyx", "drop": "jud+offknown", "tta": True},
+        "noleak+xt": {"feats": "everyx", "drop": "jud+offknown",
+                      "params_over": {"extra_trees": True}},
+        "noleak+xt+rot": {"feats": "everyx", "drop": "jud+offknown", "rot": True,
+                          "params_over": {"extra_trees": True}},
+        # extra_trees is the first regulariser on this problem that paid, and
+        # the 500-trial hyper-parameter search that found nothing was run
+        # WITHOUT it. A randomised split threshold under-fits each tree, so the
+        # capacity optimum moves: more leaves and a lower learning rate should
+        # now be affordable where they were not. This is not a re-run of that
+        # search — it is the same search conditioned on a different base.
+        "xt-leaves127": {"params_over": {"extra_trees": True, "num_leaves": 127}},
+        "xt-leaves255": {"params_over": {"extra_trees": True, "num_leaves": 255,
+                                         "learning_rate": 0.02}},
+        "xt-ff06": {"params_over": {"extra_trees": True, "feature_fraction": 0.6}},
+        "xt-bag07": {"params_over": {"extra_trees": True, "bagging_fraction": 0.7}},
+        "xt-lr015": {"params_over": {"extra_trees": True, "learning_rate": 0.015}},
+        "xt-minleaf30": {"params_over": {"extra_trees": True,
+                                         "min_data_in_leaf": 30}},
+        # the honest model: the post-fight judge columns out, and the card's
+        # officials in their place
+        "judc": {"feats": "everyx+judc"},
+        "noleak+judc": {"feats": "everyx+judc", "drop": "jud+offknown"},
+        "noleak+judc+xt": {"feats": "everyx+judc", "drop": "jud+offknown",
+                           "params_over": {"extra_trees": True}},
+        # the deployment configuration on the honest feature set: both corner
+        # orientations in training, both at prediction time, a refit every
+        # twelve months, and the one regulariser that paid
+        "deploy": {"mirror_train": True, "tta": True, "walk_months": 12,
+                   "params_over": {"extra_trees": True}},
+        "deploy-noxt": {"mirror_train": True, "tta": True, "walk_months": 12},
+        "rot": {"rot": True},
+        "rot+tta": {"rot": True, "tta": True},
+        "xt+rot": {"rot": True, "params_over": {"extra_trees": True}},
+        "xt+ttashrink": {"params_over": {"extra_trees": True}, "tta": True,
+                         "shrink": True},
     }
     names = [n for n in (only.split(",") if only else EXPS) if n in EXPS]
     if "base" not in names:
@@ -541,6 +837,8 @@ def main() -> None:
             if "drop" in kw:
                 gone = {x for g in kw.pop("drop").split("+") for x in ME.GROUPS[g]}
                 c = [x for x in c if x not in gone]
+        if kw.pop("rot", False):
+            c = c + [x for x in ensure_rot(BENCH) if x not in c]
         r = run(BENCH, c, seeds=kw.pop("seeds", seeds), **kw)
         if base is None:
             base = r
