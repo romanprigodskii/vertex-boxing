@@ -58,23 +58,40 @@ def fair(xa, xb):
     return ia / s, ib / s
 
 
-def clv_roi(p, y, oa, ob, ca, cb):
+def clv_roi(p, y, oa, ob, ca, cb, cap=np.inf, devig="power"):
+    """CLV and ROI on the bets this model would strike, plus the return the
+    closing price itself predicts for them.
+
+    `cap` refuses any bet whose own price is at or above it. That is a rule
+    about the price, not about the edge — knowable before the bell, and it
+    exists because clv_money.py found the closing-line value is +0.045 in
+    probability below 2.0 and MINUS 0.032 above 5.0. The average hid two
+    opposite things.
+
+    The third number, `imp`, is E[o*q]-1 with q the de-vigged closing
+    probability: what these bets pay if the closing price is the truth. It has
+    no outcomes in it, so its interval is roughly a seventh as wide as ROI's,
+    and it is the one that says whether a positive ROI is edge or luck.
+    """
     ok = np.isfinite(oa) & np.isfinite(ob) & (oa > 1) & (ob > 1)
     ea = p - 1 / np.where(ok, oa, np.inf)
     eb = (1 - p) - 1 / np.where(ok, ob, np.inf)
-    ba = (ea > EDGE) & (ea >= eb) & ok
-    bb = (eb > EDGE) & (eb > ea) & ok
+    ba = (ea > EDGE) & (ea >= eb) & ok & (oa < cap)
+    bb = (eb > EDGE) & (eb > ea) & ok & (ob < cap)
     sel = ba | bb
+    nan2 = (np.nan, np.nan)
     if sel.sum() < 12:
-        return 0, np.nan, (np.nan, np.nan), np.nan, (np.nan, np.nan)
+        return 0, np.nan, nan2, np.nan, nan2, np.nan, nan2
     fo_a, fo_b = fair(oa[sel], ob[sel])
     fc_a, fc_b = fair(ca[sel], cb[sel])
     moved = np.where(ba[sel], fc_a - fo_a, fc_b - fo_b)
     took = np.where(ba[sel], oa[sel], ob[sel])
     won = np.where(ba[sel], y[sel] == 1, y[sel] == 0)
     pnl = np.where(won, took - 1.0, -1.0)
+    q = ME.devig(1 / ca[sel], 1 / cb[sel], devig)
+    imp = took * np.where(ba[sel], q, 1 - q) - 1.0
     return (int(sel.sum()), float(moved.mean()), boot(moved),
-            float(pnl.mean()), boot(pnl))
+            float(pnl.mean()), boot(pnl), float(imp.mean()), boot(imp))
 
 
 def main() -> None:
@@ -114,19 +131,41 @@ def main() -> None:
     print(f"модель {ll(p, y).mean():.4f} · рынок "
           f"{ll(B.p_mkt[win], y).mean():.4f}\n")
     hdr = (f"{'срез':34s} {'ставок':>7s} {'CLV':>9s} {'95%':>20s} "
-           f"{'ROI':>8s} {'95%':>18s}")
+           f"{'ROI':>8s} {'95%':>18s} {'ROI по закр.':>13s}")
     print(hdr); print("-" * len(hdr))
+
+    def line(name, m, cap=np.inf):
+        r = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m], cap=cap)
+        n, c, (lo, hi), roi, (rlo, rhi), imp, (ilo, ihi) = r
+        if not n:
+            return
+        print(f"{name:34s} {n:7d} {c:+9.4f} [{lo:+.4f},{hi:+.4f}] "
+              f"{roi:+7.1%} [{rlo:+.1%},{rhi:+.1%}] "
+              f"{imp:+7.1%} [{ilo:+.1%},{ihi:+.1%}]")
+
     for name, m in (("ВСЕ котируемые", np.ones(len(y), bool)),
                     ("низкий уровень (<=8р, без пояса)", low),
                     ("ВЕРХНИЙ (12р или конт./мир. пояс)", top)):
-        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m],
-                                                  ca[m], cb[m])
-        if not n:
-            continue
-        print(f"{name:34s} {n:7d} {c:+9.4f} [{lo:+.4f},{hi:+.4f}] "
-              f"{roi:+7.1%} [{rlo:+.1%},{rhi:+.1%}]")
-    print("\nПравило подтверждается, только если ВЕРХНИЙ срез даёт CLV заметно "
-          "выше нижнего\nна окне, которого правило не видело.")
+        line(name, m)
+
+    # The second rule, and the reason this script now carries a price cap.
+    # clv_money.py found the upper tier's closing-line value is entirely a
+    # favourites effect: +0.045 in probability below 2.0, -0.032 above 5.0.
+    # That was read off a table on the 2023-06+ window, so it is exactly the
+    # kind of number that shrinks when tested elsewhere — which is what this
+    # window is for. Cut-points are declared here and not tuned.
+    print("\n=== потолок цены поверх того же фильтра по уровню ===")
+    print("(правило о цене, не об эдже; выбрано по механизму favourite-longshot,")
+    print(" проверяется здесь на окне, которого оно не видело)")
+    print(hdr); print("-" * len(hdr))
+    for cap in (2.0, 3.0, 5.0):
+        line(f"ВЕРХНИЙ, цена < {cap:.0f}", top, cap=cap)
+
+    print("\nЧитать так: правило по уровню подтверждается, только если ВЕРХНИЙ "
+          "срез даёт CLV\nзаметно выше нижнего. Правило по цене — только если "
+          "полоса фаворитов держит\nCLV и здесь. А колонка «ROI по закрытию» "
+          "говорит, чего ждать от денег: она узкая\nи в ней нет исходов боёв, "
+          "так что расхождение с фактическим ROI — это удача, не эдж.")
 
 
 if __name__ == "__main__":
