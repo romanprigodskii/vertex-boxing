@@ -107,6 +107,12 @@ class Bench:
                   for m, v in cands.items()}
         self.dv = min(slopes, key=lambda m: abs(slopes[m] - 1.0))
         self.p_mkt = cands[self.dv]
+        # the raw decimal prices too: log-loss is scored on the devigged
+        # probability, but a bet is settled at the number on the board
+        self.ca, self.cb = ca, cb
+        oa = np.where(same, j["open_a"], j["open_b"]).astype(float)
+        ob = np.where(same, j["open_b"], j["open_a"]).astype(float)
+        self.oa, self.ob = oa, ob
 
         pre = (self.df["dt"] <= self.cutoff).values
         nd = (~self.df["is_draw"]).values
