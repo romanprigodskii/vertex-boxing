@@ -5,6 +5,64 @@ mature; this documents exactly what carries over and what must change. The plan
 below is kept as written; what follows immediately is what actually happened
 when it was run.
 
+## The third pass (2026-08-04) — read this before the section below
+
+Two things happened on the night of 3–4 August, and the second one changes how
+to read every number in this file.
+
+**The bench did not repeat itself, at two different levels.** LightGBM chooses
+row-wise or column-wise histogram building by TIMING a few iterations, so the
+same data on a busier machine takes the other path and sums the same floats in a
+different order: two runs of `base` with the same seed scored 0.3406 and 0.3408.
+And the replay itself was not reproducible ACROSS PROCESSES, for a subtler
+reason — five columns (`d_common`, `judc_home`, `d_home_judc`, `judc_fav`,
+`d_elo_judc`) are summed over a SET, and Python randomises string hashing per
+process, so the order of the addends differs in every run and the last bit with
+it. A last bit puts a value on the other side of a split threshold. Both are
+fixed (`force_row_wise` + `deterministic`; `sorted()` on the three set
+iterations), both have a permanent test — `base-repeat`, and re-running the
+replay under two `PYTHONHASHSEED` values — and the effect was worth about 0.0003
+on the holdout, a fifth of what this bench accepts as a result.
+
+**A block of 31 columns about RATING COMPARABILITY pays, and only in the
+configuration that ships.** Shrunk per-fighter rates, the win graph itself
+(union-find components, path length between the corners, two-step chains,
+point-in-time PageRank), division-relative ratings, and a third much faster Elo.
+On plain `everyx` at one seed each of the four groups is worth between −0.0006
+and −0.0002 on the confirmation half. Underneath `extra_trees` and mirror
+training, three seeds, paired bootstrap on the same bouts, the block is worth
++0.0005 on the corpus, +0.0025 on premium and +0.0038 against the closing line.
+The sign tracks how much the market cares about the population, which is the
+leak of 2026-08-02 read backwards: that one paid 64.9% of its value where the
+weaker man had under three recorded bouts, and this one pays where the records
+are deep, because comparability only binds when both ratings are estimated from
+something.
+
+It is the default now: `everyz` is `everyx` plus the block and `market_eval.py`
+resolves to it, so the scoreboard reads corpus 0.3342 / premium 0.2820 / quoted
+0.3680 against the market's 0.3469 — a gap of **−0.0211 [−0.0322,−0.0100]**,
+against −0.0240 on the same stack a week ago — and the blend beats the close by
++0.0043 [+0.0024,+0.0062] at λ 0.17. `--feats everyx` reproduces the old
+scoreboard exactly.
+
+With walk-forward retraining every twelve months on top (`lab.py --tag l6
+--feats everyz --exp deploy --seeds 3`): corpus **0.3324**, confirmation half
+0.3273, premium **0.2810**, quoted **0.3667** — a gap of **−0.0198**, against
+0.3328 / 0.2829 / 0.3693 / −0.0224 for the same protocol on feature version 11.
+That is the best number this project has recorded. It is NOT a paired
+comparison — different feature versions, different runs, and the old one was
+measured on the bench before the two reproducibility fixes — so the evidence for
+the block remains the +0.0023 [+0.0010,+0.0036] on premium above, not the
+difference between −0.0224 and −0.0198.
+
+Measured and dead: the BoxRec form strip (verified pre-bell, 72.4% coverage,
+−0.0007 on the confirmation half), early stopping on the premium slice (−0.0012
+on premium itself), retuning Elo's K to its standalone optimum (−0.0008), and
+whole-history rating, which was the last unbuilt item on the plan at the bottom
+of this file. Details and the λ-by-slice diagnostic are in `docs/status.md`
+section 9 — including the finding that λ is 0.00 on club distances and on
+thin-record bouts, i.e. that no feature can pay there through the blend.
+
 ## Where it stands (measured 2026-08-01, second pass)
 
 One command reproduces it: `market_eval.py --tta --mirror --blend`. The
@@ -233,6 +291,42 @@ corpus and 0.3326 / 0.3332 / 0.3336 on the confirmation half, so **a one-seed
 screen resolves about 0.001 and no better**. Everything above 0.002 was
 re-measured on five seeds before it was believed; everything at 0.001 is
 reported as one seed and labelled as such.
+
+### Added 2026-08-04 to the dead-end list
+The BoxRec **form strip** — each man's last six results as printed on the event
+page, verified pre-bell on 403 fighter-bouts (376 match the six before the bout,
+3 include it, 24 disagree and those have a median of one bout BoxRec counted and
+we did not), parsed for 72.4% of the corpus on both corners. Worth −0.0007
+[−0.0014,−0.0001] on the confirmation half. It fails for a reason the λ
+diagnostic states independently: on the corners where our corpus holds fewer
+than three bouts the strip averages 2.5 entries, and those are the bouts we
+already have · **early stopping on the premium slice**, which is 4% of the
+validation rows, stops at 725 trees instead of 1,107 and costs −0.0012
+[−0.0019,−0.0005] on premium itself; down-weighting the rest to a tenth rather
+than zero changes nothing at all · **retuning Elo's K**. `rating_scan.py` scores
+a rating's own forecast with no boosting in the loop and puts the single-Elo
+optimum near K=256, eight times ours; K=160 with a provisional 320 for a man's
+first ten bouts costs −0.0008 on the confirmation half. The criterion rewards a
+rating that is really a recent-form counter, which `streak`, `form3` and `b365`
+already carry, and charges for it by making the thirty features built on Elo
+noisier · **whole-history rating** (Coulom), the last unbuilt item on the plan
+below and BoxRec's own method: a Wiener prior on strength drift, MAP over the
+whole career, diagonal Newton, point-in-time at yearly checkpoints, with a real
+posterior variance. Its own forecast beats Elo (0.4385 against 0.5161) and
+Bradley-Terry (0.4891) and loses to Glicko-2 (0.3704), and on top of the
+existing set it adds nothing: +0.0001 corpus, −0.0000 premium, +0.0001 quoted ·
+**stacking**, which is the graded observation entering as a FEATURE rather than
+as a target — one auxiliary model for P(stoppage) and one for the judges'
+dominance, both fitted in expanding point-in-time blocks so no row is ever
+scored by a model that saw it, both symmetrised by construction, the main loss
+untouched. It costs −0.0036 [−0.0051,−0.0020] on premium, and the shape says
+why: the selection half improves by +0.0062 while the confirmation half moves
+−0.0001, which is distribution shift rather than missing signal. The auxiliary
+model gets better as its training window grows, so the feature is noisier on old
+blocks than on new ones and the main model calibrates its trust on the wrong
+ones. P(stoppage) itself is well calibrated — predicted mean 0.507 against an
+actual 0.500 — so the auxiliary model works and the feature made from it is
+still harmful.
 
 ### Measured dead ends — do not re-run these
 Isotonic or Platt calibration of any population (isotonic on 29k club bouts cost

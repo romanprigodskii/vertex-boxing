@@ -5,9 +5,14 @@ training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
 The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with
---tta --mirror --xt, corpus 0.3346 / premium 0.2848 / -0.0240 against the close
-and a blend of +0.0040 [+0.0022, +0.0059], measured 2026-08-02 on feature
-version 11.
+--tta --mirror --xt, corpus 0.3342 / premium 0.2820 / **-0.0211** against the
+close and a blend of +0.0043 [+0.0024, +0.0062] at λ 0.17, measured 2026-08-04
+on feature version 15 and the `everyz` set — `everyx` plus the comparability
+block, which is the default here and is worth +0.0023 [+0.0010,+0.0036] on the
+premium holdout in exactly this configuration and nothing outside it.
+
+  --feats everyx   reproduces the 2026-08-02 scoreboard: corpus 0.3346 /
+                   premium 0.2848 / -0.0240 / blend +0.0040 at λ 0.16.
 
 Those are WORSE on the corpus than the 0.3325 published on 2026-08-01 and BETTER
 against the market, because the earlier number contained a post-bell leak.
@@ -22,7 +27,8 @@ because each is worth about +0.0013, 63 leaves because a 500-trial search could
 not beat it, and `everyx` because the 87 features added on 2026-08-01 are worth
 +0.0025 on the confirmation half of the holdout.
 
-  ./venv/bin/python scripts/market_eval.py --tta --mirror --blend   <- headline
+  ./venv/bin/python scripts/market_eval.py --tag l6 --tta --mirror --xt --blend
+                                                                    <- headline
   ./venv/bin/python scripts/market_eval.py --feats everyc --drop ref --label no-ref
   ./venv/bin/python scripts/market_eval.py --tta --price open --blend --label open
 
@@ -96,7 +102,16 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           # the legitimate replacement for `jud`: the card's officials, not the
           # bout's panel. Computed but deliberately outside everyx until it has
           # been measured, exactly as the amateur group was.
-          "judc": F.JUDC}
+          "judc": F.JUDC,
+          # the form strip off the event page — only computable on a snapshot
+          # extended by snapshot_extend.py, and outside everyx until measured
+          "l6": F.L6,
+          # the 2026-08-03 groups, all computed and all outside everyx until
+          # each has been measured on its own
+          "shr": F.SHR, "grf": F.GRF, "divr": F.DIVR, "elo3": F.ELO3,
+          # whole-history rating, the one item on the original port
+          # plan's list that had never been built
+          "whr": F.WHR}
 
 SETS = {
     "base": F.BASE,
@@ -107,6 +122,10 @@ SETS = {
     "everyo": F.EVERY_O,  # …and the officials who worked the bout
     "everyc": F.EVERY_C,  # …and what the saved event pages carried
     "everyx": F.EVERY_X,  # …and the levels, uncertainty, residuals and context
+    # …and the comparability block. THE DEFAULT, because it is what the
+    # deployment configuration should carry; `--feats everyx` reproduces every
+    # number published before 2026-08-04.
+    "everyz": F.EVERY_Z,
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
@@ -150,7 +169,7 @@ def build(tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     The cache carries the feature-set version in its name: a matrix written by
     an older definition of replay() can never be picked up by a newer one."""
-    fc = CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet"
+    fc = CACHE / F.cache_name("feats", tag)
     dc = CACHE / f"sym_{tag}.parquet"
     if fc.exists() and dc.exists():
         return pd.read_parquet(dc), pd.read_parquet(fc)
@@ -170,7 +189,7 @@ def build_mirror(tag: str, df: pd.DataFrame) -> pd.DataFrame:
     a feature. It is the same replay on the flipped frame — which is exact,
     because every update in replay() treats the two corners alike.
     """
-    fc = CACHE / f"featsmir_{tag}_v{F.FEATS_VERSION}.parquet"
+    fc = CACHE / F.cache_name("featsmir", tag)
     if fc.exists():
         return pd.read_parquet(fc)
     out = df.copy()
@@ -391,7 +410,7 @@ def main() -> None:  # noqa: PLR0915
     from sklearn.metrics import accuracy_score, log_loss
 
     tag = arg("--tag", "card")
-    fset = arg("--feats", "everyx")
+    fset = arg("--feats", "everyz")
     calib = arg("--calib", "none")       # none | all | matched | aux | regime | quoted
     weight = arg("--weight", "none")     # none | quoted
     label = arg("--label", fset)
@@ -520,7 +539,11 @@ def main() -> None:  # noqa: PLR0915
               "feature_fraction": float(arg("--ff", "0.9")),
               "bagging_fraction": float(arg("--bf", "0.9")), "bagging_freq": 5,
               "lambda_l2": float(arg("--l2", "5.0")),
-              "verbosity": -1, "seed": 42}
+              "verbosity": -1, "seed": 42,
+              # the scoreboard has to be reproducible on a busy machine: see
+              # the same two lines in lab.py, and base-repeat, which is what
+              # found this
+              "force_row_wise": True, "deterministic": True}
     if "--xt" in sys.argv:
         # Extremely randomised splits: the threshold is drawn rather than
         # optimised, which under-fits each tree and decorrelates the ensemble.

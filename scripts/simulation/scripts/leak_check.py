@@ -35,15 +35,17 @@ CACHE = ROOT / "imports" / "staging"
 def main() -> None:
     tag = sys.argv[1] if len(sys.argv) > 1 else "post-ingest"
     df = pd.read_parquet(CACHE / f"sym_{tag}.parquet")
-    feats = pd.read_parquet(CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet")
+    feats = pd.read_parquet(CACHE / F.cache_name("feats", tag))
     # Score the columns the model actually uses. A column that is computed and
     # quarantined — AMAT, and now the post-bell judge block — is not a leak, and
     # a test that fails on something nobody trains on is a test nobody reads.
     if "--all" not in sys.argv:
         sys.path.insert(0, str(ROOT / "scripts" / "simulation" / "scripts"))
         import market_eval as ME
-        use = [c for c in ME.resolve("everyx") if c in feats.columns]
-        print(f"scoring the default feature set: {len(use)} of "
+        spec = (sys.argv[sys.argv.index("--feats") + 1]
+                if "--feats" in sys.argv else "everyx")
+        use = [c for c in ME.resolve(spec) if c in feats.columns]
+        print(f"scoring the {spec} feature set: {len(use)} of "
               f"{feats.shape[1]} columns (--all for every column)\n")
         feats = feats[use]
     y = F.label(df)

@@ -83,7 +83,11 @@ def main() -> None:
     d = np.load(CACHE / "preds" / f"{label}.npz", allow_pickle=True)
     p, y, pm = d["p"], d["y"], d["p_mkt"]
     ca, cb, oa, ob, key = d["ca"], d["cb"], d["oa"], d["ob"], d["key"]
-    f = pd.read_parquet(CACHE / f"feats_card_v{F.FEATS_VERSION}.parquet",
+    # the corpus tag is a flag: `card` is the frozen snapshot every older run
+    # was scored on, `l6` is the same rows with the event-page columns joined,
+    # and the level columns read here are identical in both
+    tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "card"
+    f = pd.read_parquet(CACHE / F.cache_name("feats", tag),
                         columns=["sched_rounds", "card_size", "ntrue_min",
                                  "title_lvl", "is_title"]).iloc[key].reset_index(drop=True)
     sched = f["sched_rounds"].to_numpy(float)

@@ -66,7 +66,7 @@ def mirror_feats(tag: str, df: pd.DataFrame) -> pd.DataFrame:
     the other way round. Not derivable by negating columns — some of them are
     per-corner, some are ratios, and one wrong sign is a silent bug — so it is
     the same replay on the flipped frame, cached like the first one."""
-    fc = CACHE / f"featsmir_{tag}_v{F.FEATS_VERSION}.parquet"
+    fc = CACHE / F.cache_name("featsmir", tag)
     if fc.exists():
         return pd.read_parquet(fc)
     t0 = time.time()
@@ -120,6 +120,32 @@ def ensure_rot(B) -> list[str]:
         if not has_diff:
             names.append(cd)
     return names
+
+
+STACK = ["stack_pstop", "stack_dom"]
+
+
+def ensure_stack(B) -> list[str]:
+    """The two auxiliary predictions from stack.py, added to both matrices.
+
+    They are model outputs, not replay state, so they cannot live in features.py
+    — but they must still mirror exactly, and here that is arithmetic rather
+    than a second prediction: a stoppage is a fact about the fight and does not
+    move when the corners are exchanged, and the dominance estimate is signed
+    for corner A and negates. stack.py already symmetrised both.
+    """
+    p = CACHE / f"stack_{B.tag}{F.tune_tag()}_v{F.FEATS_VERSION}.parquet"
+    if not p.exists():
+        raise SystemExit(f"{p.name} is missing — run "
+                         f"scripts/stack.py --tag {B.tag} first")
+    s = pd.read_parquet(p)
+    assert len(s) == len(B.feats), "the stack file is a different population"
+    if "stack_pstop" not in B.feats.columns:
+        for c in STACK:
+            B.feats[c] = s[c].to_numpy("float32")
+        B.mir["stack_pstop"] = s["stack_pstop"].to_numpy("float32")
+        B.mir["stack_dom"] = (-s["stack_dom"]).to_numpy("float32")
+    return list(STACK)
 
 
 # ------------------------------------------------------------- a graded target
@@ -255,7 +281,8 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         tta: bool = False, weight: str = "none", params_over: dict | None = None,
         finetune: int = 0, refit: bool = False, valfrac: float = 0.1,
         init_score: bool = False, seed0: int = 42, blend: str = "",
-        avg: str = "logit", soft: float = 0.0, shrink: bool = False):
+        avg: str = "logit", soft: float = 0.0, shrink: bool = False,
+        stop_on: str = ""):
     """Train on everything up to `cutoff` and hand back a predictor.
 
     `blend` adds a second model CLASS to the average rather than a second seed.
@@ -329,6 +356,18 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
     itr, iva = big[:cut], big[cut:]
     Xtr, ytr, wtr = X.iloc[itr], y_big[:cut], w_big[:cut]
     Xva, yva, wva = X.iloc[iva], y_big[cut:], w_big[cut:]
+    # WHERE the tree count is chosen. Early stopping reads the last tenth of the
+    # training window, and four fifths of that is club boxing the market never
+    # prices — so the one number the fit picks for itself is picked on the
+    # population we do not care about. This is NOT the training reweighting that
+    # failed six times: the model still learns from every bout with the same
+    # weight, and all that moves is the stopping criterion.
+    if stop_on:
+        pmv = B.prem_all[iva]
+        mult = float(stop_on[4:]) if stop_on.startswith("prem") and len(stop_on) > 4 else 0.0
+        wva = wva * np.where(pmv, 1.0, mult)
+        if wva.sum() <= 0:
+            raise SystemExit("stop_on left the validation slice with no weight")
     X_mir = B.mir[cols] if (mirror_train or tta) else None
     if mirror_train:
         # the same bouts entered the other way round: exact antisymmetry as
@@ -345,7 +384,17 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
     params = {"objective": "binary", "metric": "binary_logloss",
               "learning_rate": 0.03, "num_leaves": 63, "min_data_in_leaf": 100,
               "feature_fraction": 0.9, "bagging_fraction": 0.9, "bagging_freq": 5,
-              "lambda_l2": 5.0, "verbosity": -1, "seed": seed0, "num_threads": 8}
+              "lambda_l2": 5.0, "verbosity": -1, "seed": seed0, "num_threads": 8,
+              # Without these two the same run is not the same run. LightGBM
+              # picks row-wise or column-wise histogram building by TIMING a
+              # few iterations, so a busier machine takes the other path and
+              # sums the same floats in a different order; the trees then
+              # diverge and the holdout moves by more than a feature group is
+              # worth. Measured before they were set: two identical runs of
+              # `base` scored 0.3406 and 0.3408 on the corpus. That is not seed
+              # noise — the seed was the same — and it was silently underneath
+              # every screen this bench has ever printed.
+              "force_row_wise": True, "deterministic": True}
     if soft > 0:
         # "binary" wants a 0/1 label; cross_entropy is the same loss written for
         # a label anywhere in [0,1], which is what a graded outcome is
@@ -659,6 +708,13 @@ def main() -> None:
         # the same configuration on a different seed: whatever it differs from
         # base by is the resolution of a one-seed screen, and no variant closer
         # than that has been measured at all
+        # bit-for-bit the same run as base. Not a seed variant and not a
+        # sanity check nobody needs: LightGBM chooses row-wise or column-wise
+        # histogram building by TIMING a few iterations, so the same data on a
+        # busier machine takes a different code path and sums the same floats
+        # in a different order. Whatever this differs from base by is a floor
+        # under every measurement on this bench, and it is not seed noise.
+        "base-repeat": {},
         "base-seedB": {"seed0": 1042},
         "base-seedC": {"seed0": 2042},
         "walk12": {"walk_months": 12},
@@ -807,6 +863,52 @@ def main() -> None:
                                          "min_data_in_leaf": 30}},
         # the honest model: the post-fight judge columns out, and the card's
         # officials in their place
+        # THE FORM STRIP off the event page: the last six results of each man as
+        # of the night, which is recent form for the part of a career that
+        # predates our crawl. Needs `--tag l6` (snapshot_extend.py).
+        "x-l6": {"feats": "everyx+l6"},
+        "x-l6-tta": {"feats": "everyx+l6", "tta": True},
+        "x-l6-xt": {"feats": "everyx+l6", "params_over": {"extra_trees": True}},
+        "x-l6-s3": {"feats": "everyx+l6", "seeds": 3},
+        # the 2026-08-03 groups, one at a time on top of everyx
+        "x-shr": {"feats": "everyx+shr"},
+        "x-grf": {"feats": "everyx+grf"},
+        "x-divr": {"feats": "everyx+divr"},
+        "x-elo3": {"feats": "everyx+elo3"},
+        "x-new4": {"feats": "everyx+shr+grf+divr+elo3"},
+        "x-new4-s3": {"feats": "everyx+shr+grf+divr+elo3", "seeds": 3},
+        "x-whr": {"feats": "everyx+whr"},
+        "x-whr-s3": {"feats": "everyx+whr", "seeds": 3},
+        "x-grf-whr": {"feats": "everyx+grf+whr"},
+        "x-all5": {"feats": "everyx+shr+grf+divr+elo3+whr"},
+        "x-all5-s3": {"feats": "everyx+shr+grf+divr+elo3+whr", "seeds": 3},
+        # the same question asked of the configuration that actually ships:
+        # both orientations in training, both at prediction, extra_trees
+        "stack-base": {"mirror_train": True, "tta": True,
+                       "params_over": {"extra_trees": True}},
+        "stack-new4": {"feats": "everyx+shr+grf+divr+elo3", "mirror_train": True,
+                       "tta": True, "params_over": {"extra_trees": True}},
+        "stack-grf": {"feats": "everyx+grf", "mirror_train": True, "tta": True,
+                      "params_over": {"extra_trees": True}},
+        "stack-all5": {"feats": "everyx+shr+grf+divr+elo3+whr",
+                       "mirror_train": True, "tta": True,
+                       "params_over": {"extra_trees": True}},
+        "stack-stk": {"feats": "everyx+shr+grf+divr+elo3", "stack": True,
+                      "mirror_train": True, "tta": True,
+                      "params_over": {"extra_trees": True}},
+        # the walk-forward deployment number, with and without the block
+        "deploy-new4": {"feats": "everyx+shr+grf+divr+elo3", "mirror_train": True,
+                        "tta": True, "walk_months": 12,
+                        "params_over": {"extra_trees": True}},
+        "x-new5": {"feats": "everyx+shr+grf+divr+elo3+l6"},
+        # the graded observation, arriving as a feature instead of as a target
+        "x-stack": {"stack": True},
+        "x-stack-s3": {"stack": True, "seeds": 3},
+        "x-new5-stack": {"feats": "everyx+shr+grf+divr+elo3+l6", "stack": True},
+        # …and the tree count chosen on the population we would bet
+        "stop-prem": {"stop_on": "prem"},
+        "stop-prem10": {"stop_on": "prem0.1"},
+        "stop-prem-xt": {"stop_on": "prem", "params_over": {"extra_trees": True}},
         "judc": {"feats": "everyx+judc"},
         "noleak+judc": {"feats": "everyx+judc", "drop": "jud+offknown"},
         "noleak+judc+xt": {"feats": "everyx+judc", "drop": "jud+offknown",
@@ -839,6 +941,8 @@ def main() -> None:
                 c = [x for x in c if x not in gone]
         if kw.pop("rot", False):
             c = c + [x for x in ensure_rot(BENCH) if x not in c]
+        if kw.pop("stack", False):
+            c = c + [x for x in ensure_stack(BENCH) if x not in c]
         r = run(BENCH, c, seeds=kw.pop("seeds", seeds), **kw)
         if base is None:
             base = r
