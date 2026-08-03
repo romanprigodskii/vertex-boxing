@@ -116,6 +116,10 @@ SETS = {
     "everyo": F.EVERY_O,  # …and the officials who worked the bout
     "everyc": F.EVERY_C,  # …and what the saved event pages carried
     "everyx": F.EVERY_X,  # …and the levels, uncertainty, residuals and context
+    # …and the comparability block. THE DEFAULT, because it is what the
+    # deployment configuration should carry; `--feats everyx` reproduces every
+    # number published before 2026-08-04.
+    "everyz": F.EVERY_Z,
     # Recursive strength-of-schedule looked harmful on the 416 quoted bouts
     # (-0.0135 [-0.0253, -0.0017]) and helpful on the 75,779-bout corpus
     # holdout (+0.0023 [+0.0015, +0.0031]). The second instrument is the one
@@ -400,7 +404,7 @@ def main() -> None:  # noqa: PLR0915
     from sklearn.metrics import accuracy_score, log_loss
 
     tag = arg("--tag", "card")
-    fset = arg("--feats", "everyx")
+    fset = arg("--feats", "everyz")
     calib = arg("--calib", "none")       # none | all | matched | aux | regime | quoted
     weight = arg("--weight", "none")     # none | quoted
     label = arg("--label", fset)

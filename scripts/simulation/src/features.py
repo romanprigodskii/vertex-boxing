@@ -389,6 +389,16 @@ EVERY_C = EVERY_O + CARD
 _POST_BELL = set(JUD) | {"off_known"}
 EVERY_X = ([c for c in EVERY_C if c not in _POST_BELL]
            + LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + JUDC)
+# …and the comparability block, measured 2026-08-04. EVERY_X is kept exactly as
+# it was so that every number published against it stays reproducible; this is
+# the set the deployment configuration should use, because that is the only
+# place the block was measured and the only place it pays: +0.0023 [+0.0010,
+# +0.0036] on the premium holdout under mirror training and extra_trees, against
+# -0.0006 to -0.0002 per group on a plain one-seed screen. See status.md 9.2.
+#
+# L6, AMAT, WHR and the post-bell judge columns stay out, each for its own
+# measured reason.
+EVERY_Z = EVERY_X + SHR + GRF + DIVR + ELO3
 
 
 # --------------------------------------------------------------------- Glicko-2
