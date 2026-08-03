@@ -102,7 +102,10 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           "l6": F.L6,
           # the 2026-08-03 groups, all computed and all outside everyx until
           # each has been measured on its own
-          "shr": F.SHR, "grf": F.GRF, "divr": F.DIVR, "elo3": F.ELO3}
+          "shr": F.SHR, "grf": F.GRF, "divr": F.DIVR, "elo3": F.ELO3,
+          # whole-history rating, the one item on the original port
+          # plan's list that had never been built
+          "whr": F.WHR}
 
 SETS = {
     "base": F.BASE,

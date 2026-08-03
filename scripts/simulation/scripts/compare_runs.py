@@ -14,13 +14,46 @@ from pathlib import Path
 import numpy as np
 
 PRED = Path(__file__).resolve().parents[3] / "imports" / "staging" / "preds"
+LAB = Path(__file__).resolve().parents[3] / "imports" / "staging" / "lab"
 
 
 def ll(p, y):
     return -np.log(np.clip(np.where(y == 1, p, 1 - p), 1e-9, 1))
 
 
+def lab_pair(a: str, b: str) -> None:
+    """The same comparison between two BENCH runs.
+
+    lab.py reports every variant against whichever ran first, which is right for
+    a screen and wrong the moment two variants both differ from it — "the
+    deployment stack with the new groups" against "the deployment stack" is a
+    question neither line answers. The saved matrices make it one call.
+    """
+    A = np.load(LAB / f"{a}.npz", allow_pickle=True)
+    B = np.load(LAB / f"{b}.npz", allow_pickle=True)
+    assert (A["key_corp"] == B["key_corp"]).all(), "different holdout rows"
+    rng = np.random.default_rng(42)
+    for name, sel in (("corpus", slice(None)), ("premium", A["prem"])):
+        y = A["y_corp"][sel]
+        d = ll(A["p_corp"][sel], y) - ll(B["p_corp"][sel], y)
+        boot = np.array([rng.choice(d, len(d), replace=True).mean()
+                         for _ in range(2000)])
+        lo, hi = np.percentile(boot, [2.5, 97.5])
+        print(f"  {name:8s} n={len(d):7,}  {a} {ll(A['p_corp'][sel], y).mean():.4f} → "
+              f"{b} {ll(B['p_corp'][sel], y).mean():.4f}  "
+              f"Δ {d.mean():+.4f} [{lo:+.4f},{hi:+.4f}]")
+    y = A["y_q"]
+    d = ll(A["p_q"], y) - ll(B["p_q"], y)
+    boot = np.array([rng.choice(d, len(d), replace=True).mean() for _ in range(2000)])
+    lo, hi = np.percentile(boot, [2.5, 97.5])
+    print(f"  {'quoted':8s} n={len(d):7,}  {a} {ll(A['p_q'], y).mean():.4f} → "
+          f"{b} {ll(B['p_q'], y).mean():.4f}  Δ {d.mean():+.4f} [{lo:+.4f},{hi:+.4f}]")
+
+
 def main() -> None:
+    if "--lab" in sys.argv:
+        i = sys.argv.index("--lab")
+        return lab_pair(sys.argv[i + 1], sys.argv[i + 2])
     if len(sys.argv) < 3:
         print("usage: compare_runs.py <label_a> <label_b>")
         print("saved:", ", ".join(sorted(p.stem for p in PRED.glob("*.npz"))))

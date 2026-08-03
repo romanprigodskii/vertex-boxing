@@ -37,7 +37,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 13
+FEATS_VERSION = 14
 
 
 def _envf(name: str, default: float) -> float:
@@ -71,17 +71,26 @@ ELO_SLOW_K = _envf("VB_ELO_SLOWK", 12.0)
 GL_C = _envf("VB_GL_C", 50.0)
 # the pseudo-count behind every shrunk per-fighter rate (the SHR group)
 SHR_M = _envf("VB_SHR_M", 6.0)
+# how far a fighter's true strength is allowed to drift in a year, in rating
+# points — the whole content of WHR's prior. 300 is where the rating's own
+# forecast turns: 40/70/120/200/300/450/650 score 0.6230/0.5734/0.5089/0.4575/
+# 0.4385/0.4433/0.4674 on the 118,860 bouts where every rating in the file is
+# defined, against 0.5161 for Elo, 0.4891 for Bradley-Terry and 0.3704 for
+# Glicko-2, which wins that comparison outright and is worth remembering before
+# reading anything into WHR's column
+WHR_W = _envf("VB_WHR_W", 300.0)
 
 _DEFAULTS = {"VB_ELO_K": 32.0, "VB_ELO_KNEW": 0.0, "VB_ELO_NEWUNTIL": 10.0,
              "VB_ELO_FASTK": 192.0, "VB_ELO_SLOWK": 12.0, "VB_GL_C": 50.0,
-             "VB_SHR_M": 6.0}
+             "VB_SHR_M": 6.0, "VB_WHR_W": 300.0}
 
 
 def tune_tag() -> str:
     """A cache-name suffix naming every rating knob that is off its default."""
     now = {"VB_ELO_K": ELO_K, "VB_ELO_KNEW": ELO_K_NEW,
            "VB_ELO_NEWUNTIL": ELO_NEW_UNTIL, "VB_ELO_FASTK": ELO_FAST_K,
-           "VB_ELO_SLOWK": ELO_SLOW_K, "VB_GL_C": GL_C, "VB_SHR_M": SHR_M}
+           "VB_ELO_SLOWK": ELO_SLOW_K, "VB_GL_C": GL_C, "VB_SHR_M": SHR_M,
+           "VB_WHR_W": WHR_W}
     off = [f"{k[3:].lower()}{v:g}" for k, v in now.items() if v != _DEFAULTS[k]]
     return ("-" + "-".join(off)) if off else ""
 
@@ -327,6 +336,22 @@ ELO3 = ["d_elo_fast", "efast_min", "efast_max", "d_elo_fs"]
 BTX = ["bt8_min", "bt8_max", "d_bt_z"]
 # …and the three fitted in pr_ratings
 PRX = ["d_pr", "pr_min", "pr_max"]
+# WHOLE-HISTORY RATING (Coulom 2008), which is BoxRec's own method and the one
+# thing on the "consider adding" list from the original port plan that was never
+# built. Elo and Glicko are ONLINE: a rating is a running estimate that saw the
+# opponent as he stood on the night, and in a sport with three fights a year
+# most of a man's number was set by a version of his opponents that no longer
+# exists. Bradley-Terry (bt_ratings) fixes that by refitting the whole graph,
+# but it has no model of TIME inside a career: a decayed weight says a 2015
+# result matters less than a 2023 one, not that the man himself changed.
+#
+# WHR puts a Wiener process on each fighter's strength — the prior says he
+# drifts by so much a year — and finds the MAP path through his whole career at
+# once. Two things fall out that nothing else here has: the rating on a night he
+# did not fight is INTERPOLATED from both sides rather than held flat, and the
+# curvature at the solution is a real posterior variance, which is exactly the
+# quantity a two-bout record needs and the one Elo cannot express.
+WHR = ["d_whr", "whr_min", "whr_max", "whrsd_min", "whrsd_max", "d_whr_z"]
 
 TITLE_RUNG = {"other": 1.0, "regional": 1.0, "national": 2.0,
               "continental": 3.0, "international": 4.0, "world": 5.0}
@@ -336,7 +361,7 @@ NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
 # the 2026-08-01 groups, always computable — they need no extra columns
 EXTRA = (LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT + JUDC
-         + SHR + GRF + DIVR + ELO3)
+         + SHR + GRF + DIVR + ELO3 + WHR)
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
@@ -592,6 +617,132 @@ def pr_ratings(df: pd.DataFrame, tau: float = 8.0, step_days: int = 90,
         out["d_pr"][sl] = pa - pb
         out["pr_min"][sl] = np.minimum(pa, pb)
         out["pr_max"][sl] = np.maximum(pa, pb)
+    return out
+
+
+# ------------------------------------------- whole-history rating (Coulom 2008)
+def whr_ratings(df: pd.DataFrame, step_days: int = 365,
+                first_year: int = 1970, sweeps: int = 25) -> dict[str, np.ndarray]:
+    """Each fighter's strength as a Brownian path, fitted over his whole career.
+
+    One time step per bout, which is the same choice Glicko-2 already makes here
+    and for the same reason: boxers fight three times a year on no schedule, so
+    a calendar rating period is a fiction. The posterior is
+
+        Σ_games  log σ(r_i − r_j)   +   Σ_steps  N(r_k − r_{k−1}; 0, w²·Δt)
+
+    with a weak anchor on each man's first step to keep the whole system
+    identified. Coulom solves each player's tridiagonal Newton system exactly;
+    this takes the DIAGONAL of the same Newton step and sweeps more times, which
+    is stable, needs no per-player Python loop over 826,558 steps, and — warm
+    started from the previous checkpoint — converges to the same place. That is
+    an approximation and is written down as one.
+
+    Point-in-time on the same terms as bt_ratings and pr_ratings: the fit at a
+    checkpoint sees only bouts dated before it, and the rating a bout reads is
+    its man's LAST fitted step before that checkpoint, so at worst it is a year
+    stale and never a day early. Bouts before the first checkpoint are NaN
+    rather than guessed; with a six-year half-life they carry 0.7% of a recent
+    bout's weight in training anyway.
+
+    Returned on the Elo scale (×173.7) so the columns are readable next to
+    d_elo, and with the posterior standard deviation, which is the half of WHR
+    no other rating in this file can produce.
+    """
+    n = len(df)
+    ia_b = df["a"].astype(str).to_numpy()
+    ib_b = df["b"].astype(str).to_numpy()
+    t_b = df["dt"].to_numpy("datetime64[D]").astype(np.int64).astype(np.float64)
+    sa_b = np.where(df["is_draw"].to_numpy(), 0.5,
+                    (df["winner_id"].astype(str).to_numpy() == ia_b).astype(float))
+
+    # one entry per (bout, corner); the two corners of a bout point at each other
+    pid_raw = np.concatenate([ia_b, ib_b])
+    fighters, pid = np.unique(pid_raw, return_inverse=True)
+    n_f = len(fighters)
+    st_t = np.concatenate([t_b, t_b])
+    st_s = np.concatenate([sa_b, 1.0 - sa_b])
+    partner = np.concatenate([np.arange(n, 2 * n), np.arange(0, n)])
+    bout_of = np.concatenate([np.arange(n), np.arange(n)])
+
+    # By fighter, then chronologically, then by the bout's own row — and the
+    # third key is not decoration. 8.9% of the corpus is dated the first of a
+    # month because the pre-2010 layer has no day, so thousands of fighters
+    # carry several steps at the SAME timestamp; with a two-key sort their order
+    # falls through to the input order, which is not the same after the corners
+    # are exchanged. The chain then links a man's steps in a different sequence,
+    # the anchor lands on a different bout, and the whole group misses the
+    # mirror by about 1e-3. mirror_check.py caught it on the first run.
+    order = np.lexsort((bout_of, st_t, pid))
+    inv = np.empty_like(order)
+    inv[order] = np.arange(len(order))
+    sp_pid, sp_t, sp_s = pid[order], st_t[order], st_s[order]
+    sp_opp = inv[partner[order]]
+    N = len(order)
+
+    # neighbours inside one man's chain are just index ±1 after that sort
+    prev_ok = np.zeros(N, bool)
+    prev_ok[1:] = sp_pid[1:] == sp_pid[:-1]
+    next_ok = np.zeros(N, bool)
+    next_ok[:-1] = prev_ok[1:]
+    dtp = np.ones(N)
+    dtp[1:] = np.maximum(sp_t[1:] - sp_t[:-1], 1.0)
+    w2 = (WHR_W / _Q) ** 2 / 365.25          # drift variance per day, natural log
+    prec_prev = np.where(prev_ok, 1.0 / (w2 * dtp), 0.0)
+    prec_next = np.zeros(N)
+    prec_next[:-1] = prec_prev[1:]
+    prec_next[~next_ok] = 0.0
+    anchor = np.where(prev_ok, 0.0, 1.0 / ((350.0 / _Q) ** 2))
+
+    starts = np.searchsorted(sp_pid, np.arange(n_f))
+    r = np.zeros(N)
+    out = {k: np.full(n, np.nan) for k in WHR}
+    y0 = int(np.datetime64(f"{first_year}-01-01", "D").astype(np.int64))
+    edges = np.arange(max(y0, sp_t.min() + step_days), sp_t.max() + step_days,
+                      step_days, dtype=np.float64)
+    for c in edges:
+        m = sp_t < c
+        if m.sum() < 200:
+            continue
+        mf = m.astype(float)
+        pp = prec_prev * mf
+        pp[1:] *= mf[:-1]                    # both ends of the link inside the window
+        pn = prec_next * mf
+        pn[:-1] *= mf[1:]
+        anc = anchor * mf
+        rprev = np.empty(N); rprev[0] = 0.0; rprev[1:] = r[:-1]
+        rnext = np.empty(N); rnext[-1] = 0.0; rnext[:-1] = r[1:]
+        for _ in range(sweeps):
+            p = 1.0 / (1.0 + np.exp(-np.clip(r - r[sp_opp], -30, 30)))
+            g = mf * (sp_s - p) - pp * (r - rprev) - pn * (r - rnext) - anc * r
+            h = mf * p * (1.0 - p) + pp + pn + anc
+            r = r + 0.9 * g / np.maximum(h, 1e-9)
+            rprev[1:] = r[:-1]
+            rnext[:-1] = r[1:]
+        # each man's last fitted step before the checkpoint, and its curvature
+        cnt = np.bincount(sp_pid[m], minlength=n_f)
+        live = cnt > 0
+        last = starts[live] + cnt[live] - 1
+        p = 1.0 / (1.0 + np.exp(-np.clip(r - r[sp_opp], -30, 30)))
+        h = mf * p * (1.0 - p) + pp + pn + anc
+        rl = np.full(n_f, np.nan); sdl = np.full(n_f, np.nan)
+        rl[live] = r[last] * _Q
+        sdl[live] = _Q / np.sqrt(np.maximum(h[last], 1e-9))
+        lo = int(np.searchsorted(t_b, c))
+        hi = int(np.searchsorted(t_b, c + step_days))
+        if hi <= lo:
+            continue
+        ca = pid[:n][lo:hi]
+        cb = pid[n:][lo:hi]
+        ra, rb = rl[ca], rl[cb]
+        sda, sdb = sdl[ca], sdl[cb]
+        sl = slice(lo, hi)
+        out["d_whr"][sl] = ra - rb
+        out["whr_min"][sl] = np.minimum(ra, rb)
+        out["whr_max"][sl] = np.maximum(ra, rb)
+        out["whrsd_min"][sl] = np.minimum(sda, sdb)
+        out["whrsd_max"][sl] = np.maximum(sda, sdb)
+        out["d_whr_z"][sl] = (ra - rb) / np.sqrt(sda ** 2 + sdb ** 2)
     return out
 
 
@@ -1682,11 +1833,13 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     full = full + EXTRA
     if has_l6:
         full = full + L6
-    merged = set(BT) | set(BTX) | set(PRX)
+    merged = set(BT) | set(BTX) | set(PRX) | set(WHR)
     out = pd.DataFrame(rows, columns=[c for c in full if c not in merged])
     for k, v in bt_ratings(df).items():
         out[k] = v
     for k, v in pr_ratings(df).items():
+        out[k] = v
+    for k, v in whr_ratings(df).items():
         out[k] = v
     return out[full]
 

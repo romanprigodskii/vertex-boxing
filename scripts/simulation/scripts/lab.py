@@ -877,6 +877,19 @@ def main() -> None:
         "x-elo3": {"feats": "everyx+elo3"},
         "x-new4": {"feats": "everyx+shr+grf+divr+elo3"},
         "x-new4-s3": {"feats": "everyx+shr+grf+divr+elo3", "seeds": 3},
+        "x-whr": {"feats": "everyx+whr"},
+        "x-whr-s3": {"feats": "everyx+whr", "seeds": 3},
+        "x-grf-whr": {"feats": "everyx+grf+whr"},
+        "x-all5": {"feats": "everyx+shr+grf+divr+elo3+whr"},
+        "x-all5-s3": {"feats": "everyx+shr+grf+divr+elo3+whr", "seeds": 3},
+        # the same question asked of the configuration that actually ships:
+        # both orientations in training, both at prediction, extra_trees
+        "stack-base": {"mirror_train": True, "tta": True,
+                       "params_over": {"extra_trees": True}},
+        "stack-new4": {"feats": "everyx+shr+grf+divr+elo3", "mirror_train": True,
+                       "tta": True, "params_over": {"extra_trees": True}},
+        "stack-grf": {"feats": "everyx+grf", "mirror_train": True, "tta": True,
+                      "params_over": {"extra_trees": True}},
         "x-new5": {"feats": "everyx+shr+grf+divr+elo3+l6"},
         # the graded observation, arriving as a feature instead of as a target
         "x-stack": {"stack": True},
