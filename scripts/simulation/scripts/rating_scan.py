@@ -118,7 +118,6 @@ def run_glicko(C: Corpus, c_year: float = 50.0, tau: float = 0.5,
     g = F.Glicko2()
     g.rd = defaultdict(lambda: rd0)
     F._TAU = tau                       # module-level in Glickman's own notation
-    old_c = 50.0
     p = np.empty(len(C.a))
     na = np.empty(len(C.a)); nb = np.empty(len(C.a))
     n = defaultdict(int)
@@ -144,7 +143,6 @@ def run_glicko(C: Corpus, c_year: float = 50.0, tau: float = 0.5,
         g.update(a, b, C.sa[i], dt)
         n[a] += 1; n[b] += 1
     F._TAU = 0.5
-    del old_c
     return p, na, nb
 
 
