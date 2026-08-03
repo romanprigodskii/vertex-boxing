@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -36,9 +37,57 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 11
+FEATS_VERSION = 13
 
-ELO_K, ELO_INIT = 32.0, 1500.0
+
+def _envf(name: str, default: float) -> float:
+    v = os.environ.get(name)
+    return float(v) if v not in (None, "") else default
+
+
+# ---- the knobs on the ratings themselves ------------------------------------
+# K = 32 is the Chess Federation's number for a club player and has sat here
+# since the first commit; so have Glicko's inflation term, the slow Elo's K and
+# Bradley-Terry's decay constants. The 500-trial search that found nothing
+# searched LightGBM, and a badly set K is not noise a tree can average away — it
+# is one systematic distortion of the strongest column in the matrix, identical
+# on every row.
+#
+# They are read from the environment so a variant can be measured without a code
+# edit, and `tune_tag()` puts the setting in the cache filename, so a matrix
+# built under one K can never be picked up under another.
+ELO_INIT = 1500.0
+ELO_K = _envf("VB_ELO_K", 32.0)
+# a larger step for a man's first bouts — the provisional rating every
+# federation uses, and the one this project never had. 0 disables it.
+ELO_K_NEW = _envf("VB_ELO_KNEW", 0.0)
+ELO_NEW_UNTIL = _envf("VB_ELO_NEWUNTIL", 10.0)
+# the third member of the Elo family: fast enough that it is mostly a statement
+# about the last few fights. `rating_scan.py` puts the standalone optimum near
+# 256 with the turn shallow from 160 up.
+ELO_FAST_K = _envf("VB_ELO_FASTK", 192.0)
+ELO_SLOW_K = _envf("VB_ELO_SLOWK", 12.0)
+# Glicko's RD inflation, in rating points added per idle year
+GL_C = _envf("VB_GL_C", 50.0)
+# the pseudo-count behind every shrunk per-fighter rate (the SHR group)
+SHR_M = _envf("VB_SHR_M", 6.0)
+
+_DEFAULTS = {"VB_ELO_K": 32.0, "VB_ELO_KNEW": 0.0, "VB_ELO_NEWUNTIL": 10.0,
+             "VB_ELO_FASTK": 192.0, "VB_ELO_SLOWK": 12.0, "VB_GL_C": 50.0,
+             "VB_SHR_M": 6.0}
+
+
+def tune_tag() -> str:
+    """A cache-name suffix naming every rating knob that is off its default."""
+    now = {"VB_ELO_K": ELO_K, "VB_ELO_KNEW": ELO_K_NEW,
+           "VB_ELO_NEWUNTIL": ELO_NEW_UNTIL, "VB_ELO_FASTK": ELO_FAST_K,
+           "VB_ELO_SLOWK": ELO_SLOW_K, "VB_GL_C": GL_C, "VB_SHR_M": SHR_M}
+    off = [f"{k[3:].lower()}{v:g}" for k, v in now.items() if v != _DEFAULTS[k]]
+    return ("-" + "-".join(off)) if off else ""
+
+
+def cache_name(kind: str, tag: str) -> str:
+    return f"{kind}_{tag}{tune_tag()}_v{FEATS_VERSION}.parquet"
 # division → its nominal pound limit; a real ordering beats a category code
 DIV_LBS = {"minimumweight": 105, "light_flyweight": 108, "flyweight": 112,
            "super_flyweight": 115, "bantamweight": 118, "super_bantamweight": 122,
@@ -60,7 +109,9 @@ PAIRED = [("a", "b"), ("a_name", "b_name"),
           ("a_lbs", "b_lbs"), ("a_score", "b_score"),
           # the judges' individual cards are per-corner too, and they are
           # comma-joined strings, so swapping the strings swaps the corners
-          ("judge_a", "judge_b"), ("a_ctry", "b_ctry")]
+          ("judge_a", "judge_b"), ("a_ctry", "b_ctry"),
+          # the form strip and the record printed beside it, both per corner
+          ("a_l6", "b_l6"), ("a_rec", "b_rec")]
 
 BASE = ["d_elo", "d_bouts", "d_wr", "d_layoff", "n_a", "n_b",
         "d_home", "d_promo_ties", "promo_bouts", "city_home_bias",
@@ -216,8 +267,66 @@ THIN = ["wrtrue_seen_min", "wrtrue_seen_max", "ntrue_seen_min", "ntrue_seen_max"
 # appearance is a fact about the man rather than a hole in our crawl, and a
 # score of 0 names no corner.
 AMAT = ["d_am", "am_min", "am_max", "am_years", "am_n_min", "am_n_max"]
+# THE FORM STRIP off the event page. Every recency feature in this file — form3,
+# streak, wr_dec, b365, dsl — is computed from OUR replay, so it sees only the
+# part of a man's career that our crawl recorded. `a_bouts_before` fixes the
+# COUNT of what we are missing and says nothing about its shape. BoxRec prints
+# the last six results as a strip of icons next to each name, and that strip is
+# as of the night: on 403 fighter-bouts with eight recorded bouts behind them
+# and four ahead, it equals the last six BEFORE the bout on 376, includes the
+# bout itself on 3, and disagrees on 24 whose median hidden count is 1.
+#
+# So this is recent form for the part of the career the corpus never saw, on the
+# population where a fifth of the gap to the closing line sits. `l6_new` is the
+# part of the strip our replay cannot account for, which is the honest measure
+# of how much the group is adding on this row rather than repeating.
+L6 = ["d_l6", "d_l6_w", "d_l6_last", "d_l6_streak", "d_l6_loss",
+      "l6n_min", "l6n_max", "d_l6_new", "l6new_min", "l6new_max", "l6_known"]
+
+# ---- groups added 2026-08-03 ------------------------------------------------
+# SHRUNK RATES. Every per-fighter rate in this file is a raw ratio: a man with
+# two bouts has a knockout rate of 0.0, 0.5 or 1.0 and the model is told so with
+# the same confidence as a 40-bout veteran's 0.43. The officials, the countries
+# and the promoters have been shrunk toward a running global rate with a
+# pseudo-count since the day they were added (`_shrunk`, PSEUDO=20); the
+# fighters never were. A tree can in principle recover this by interacting each
+# rate with n_min, but that is the argument the UNC group already answered:
+# nine tenths of the training rows are club bouts where the interaction does not
+# bind, so the tree learns the axis-parallel version and stops.
+#
+# The global rate is running and point-in-time, so a 1954 bout is shrunk toward
+# what the sport looked like in 1954.
+SHR = ["d_ko_sh", "d_koed_sh", "d_dist_sh", "d_wr_sh", "d_oppwr_sh",
+       "ko_sh_min", "ko_sh_max", "koed_sh_min", "koed_sh_max",
+       "wr_sh_min", "wr_sh_max", "dist_sh_min", "dist_sh_max"]
+# THE GRAPH ITSELF, rather than a proxy for it. `same_ctry` and `venue_cos` ask
+# "are these two ratings even comparable" and answer with geography. The real
+# question is whether the two men are connected by results at all, and how
+# tightly: a rating difference across two components that exchange nothing is
+# not the same number as one inside a dense sub-graph. path_len is 1 for a
+# rematch, 2 for a common opponent, 3 for the transitive comparison boxing's
+# matchmaking makes unusually informative, and 6 when they are not connected.
+# The component sizes come from a union-find carried through the replay, which
+# is point-in-time by construction: components only ever grow.
+GRF = ["path_len", "link2", "same_comp", "comp_min", "comp_max",
+       "d_pr", "pr_min", "pr_max"]
+# THE DIVISION. One rating graph spans seventeen weight classes, so 1700 at
+# flyweight and 1700 at heavyweight sit on the same scale and mean different
+# things — the flyweight graph is denser and its ratings are further apart.
+# div_mu and div_sd say where this division's active population sits; d_div_mu
+# says whether one of these two normally fights in a stronger one.
+DIVR = ["d_elo_zdiv", "ezdiv_min", "ezdiv_max", "div_mu", "div_sd", "d_div_mu"]
+# A THIRD SPEED for Elo. The family currently runs 12 (slow) and 32 (main),
+# which is a narrow spread; `rating_scan.py` puts the standalone optimum of a
+# single Elo near 256, five times the fastest member here. A fast rating is
+# mostly a statement about the last few fights, and its DISAGREEMENT with the
+# slow one is the thing neither carries alone: a man on the way up and a man on
+# the way down have the same career rating and opposite recent ones.
+ELO3 = ["d_elo_fast", "efast_min", "efast_max", "d_elo_fs"]
 # the three of the above that are fitted in bt_ratings, not in the replay loop
 BTX = ["bt8_min", "bt8_max", "d_bt_z"]
+# …and the three fitted in pr_ratings
+PRX = ["d_pr", "pr_min", "pr_max"]
 
 TITLE_RUNG = {"other": 1.0, "regional": 1.0, "national": 2.0,
               "continental": 3.0, "international": 4.0, "world": 5.0}
@@ -226,7 +335,8 @@ ALL = BASE + RECORD + SOS2 + GLICKO + AGE + LEVEL
 NEW = H2H + DUR + FORM + LEVEL2 + ELO2 + BT + MISS
 EVERY = ALL + NEW
 # the 2026-08-01 groups, always computable — they need no extra columns
-EXTRA = LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT + JUDC
+EXTRA = (LVLR + LVLQ + UNC + RES + CTX + CMP + THIN + AMAT + JUDC
+         + SHR + GRF + DIVR + ELO3)
 # only computable on a corpus snapshot that carries the weigh-in columns
 EVERY_W = EVERY + WEIGH
 # …and the judges' cards
@@ -316,7 +426,7 @@ class Glicko2:
         if f in self.last:
             days = max((dt - self.last[f]).days, 0)
             # c chosen so an idle year adds ~50 RD, the usual boxing setting
-            rd = min(math.sqrt(rd * rd + (50.0 ** 2) * (days / 365.0)), 350.0)
+            rd = min(math.sqrt(rd * rd + (GL_C ** 2) * (days / 365.0)), 350.0)
         return self.r[f], rd
 
     def update(self, a, b, sa: float, dt) -> None:
@@ -415,6 +525,73 @@ def bt_ratings(df: pd.DataFrame, taus=(2.0, 8.0), step_days: int = 30,
                 se = np.sqrt(1.0 / np.maximum(nw[ia[sl]], 1e-6)
                              + 1.0 / np.maximum(nw[ib[sl]], 1e-6))
                 out["d_bt_z"][sl] = (ta - tb) / se
+    return out
+
+
+# ----------------------------------------------------------------- PageRank
+def pr_ratings(df: pd.DataFrame, tau: float = 8.0, step_days: int = 90,
+               iters: int = 15, damp: float = 0.85) -> dict[str, np.ndarray]:
+    """Where a man sits in the win graph, rather than how strong he is.
+
+    Bradley-Terry answers "who would beat whom"; this answers "whose wins are
+    over people whose wins are over people". They are not the same question and
+    they disagree most about the fighter this model is worst at — the unbeaten
+    prospect, whose Bradley-Terry rating is high because he keeps winning and
+    whose PageRank is low because nobody he beat has beaten anyone.
+
+    Edges run loser → winner, decayed by age, draws split both ways; the mass on
+    dangling nodes (men who have never lost) is redistributed uniformly, which is
+    the standard fix and matters here because those men are the whole point.
+
+    Point-in-time on the same terms as bt_ratings: the fit at a checkpoint sees
+    only bouts strictly before it and scores only the bouts after it.
+    """
+    fighters = pd.unique(pd.concat([df["a"], df["b"]], ignore_index=True))
+    code = {f: i for i, f in enumerate(fighters)}
+    n_f = len(fighters)
+    ia = df["a"].map(code).to_numpy(np.int64)
+    ib = df["b"].map(code).to_numpy(np.int64)
+    t = df["dt"].to_numpy("datetime64[D]").astype(np.int64).astype(np.float64)
+    sa = np.where(df["is_draw"].to_numpy(), 0.5,
+                  (df["winner_id"].astype(str).to_numpy()
+                   == df["a"].astype(str).to_numpy()).astype(float))
+    half = tau * 365.25
+    out = {k: np.full(len(df), np.nan) for k in PRX}
+    edges = np.arange(t[0] + step_days, t[-1] + step_days, step_days,
+                      dtype=np.float64)
+    for c in edges:
+        m = int(np.searchsorted(t, c))
+        hi = int(np.searchsorted(t, c + step_days))
+        if hi <= m or m == 0:
+            continue
+        w = np.exp(-(c - t[:m]) / half)
+        # loser → winner, twice, so a draw contributes half an edge each way
+        s_ = np.concatenate([ib[:m], ia[:m]])
+        d_ = np.concatenate([ia[:m], ib[:m]])
+        w_ = np.concatenate([w * sa[:m], w * (1.0 - sa[:m])])
+        keep = w_ > 0
+        s_, d_, w_ = s_[keep], d_[keep], w_[keep]
+        if not len(w_):
+            continue
+        one = np.ones_like(w_)
+        live = (np.bincount(s_, one, n_f) + np.bincount(d_, one, n_f)) > 0
+        outw = np.bincount(s_, w_, n_f)
+        dangling = live & (outw <= 0)      # never lost: all his mass is stuck
+        safe = np.where(outw > 0, outw, 1.0)
+        n_live = max(int(live.sum()), 1)
+        r = live / n_live
+        for _ in range(iters):
+            flow = np.bincount(d_, w_ * r[s_] / safe[s_], n_f)
+            r = ((1.0 - damp) / n_live) * live + damp * (
+                flow + (r[dangling].sum() / n_live) * live)
+            r /= max(r.sum(), 1e-12)
+        lg = np.log10(np.maximum(r, 1e-12))
+        lg[~live] = np.nan
+        sl = slice(m, hi)
+        pa, pb = lg[ia[sl]], lg[ib[sl]]
+        out["d_pr"][sl] = pa - pb
+        out["pr_min"][sl] = np.minimum(pa, pb)
+        out["pr_max"][sl] = np.maximum(pa, pb)
     return out
 
 
@@ -536,6 +713,34 @@ def amateur_index() -> dict[str, list[tuple]]:
     return dict(out)
 
 
+_L6V = {"W": 1.0, "D": 0.5, "L": 0.0}
+
+
+def _strip(s) -> tuple:
+    """(n, mean, recency-weighted mean, last, signed end streak, losses).
+
+    Oldest first, which is how BoxRec prints it — verified on the corpus rather
+    than assumed, since a reversed strip would put last week's knockout six
+    fights ago and nothing downstream would complain."""
+    if not isinstance(s, str) or not s:
+        return (0.0, np.nan, np.nan, np.nan, np.nan, np.nan)
+    v = [_L6V[c] for c in s if c in _L6V]
+    if not v:
+        return (0.0, np.nan, np.nan, np.nan, np.nan, np.nan)
+    n = len(v)
+    w = [0.7 ** (n - 1 - i) for i in range(n)]
+    last = v[-1]
+    k = 0
+    for x in reversed(v):
+        if x != last or last == 0.5:
+            break
+        k += 1
+    return (float(n), float(np.mean(v)),
+            float(sum(a * b for a, b in zip(v, w)) / sum(w)),
+            last, float(k if last == 1.0 else (-k if last == 0.0 else 0)),
+            float(sum(1 for x in v if x == 0.0)))
+
+
 def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     """One chronological pass. Every row is scored on the state BEFORE it."""
     elo = defaultdict(lambda: ELO_INIT)
@@ -606,6 +811,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     pop = deque(maxlen=20000)
     pop_stat = [1500.0, 100.0]                   # μ and σ, refreshed periodically
     amat = amateur_index()
+    # ---- 2026-08-03 state
+    elo_fast = defaultdict(lambda: ELO_INIT)
+    # running, point-in-time global rates: what to shrink a thin record toward
+    sh_glob = {"ko": 0.0, "koed": 0.0, "dist": 0.0, "n": 0.0}
+    uf_p: dict = {}                              # union-find over the win graph
+    uf_s: dict = {}
+    pop_div = defaultdict(lambda: deque(maxlen=4000))
+    div_stat: dict = {}
     # How many bouts were on this card. The groupby is only a card count when
     # the slug is a real event: 24,918 rows (6.0%) carry the synthetic slug
     # `boxrec-YYYY-MM-01` from the pre-2010 layer, where a whole MONTH with no
@@ -632,6 +845,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     has_s = "a_score" in df.columns
     has_o = "ref_id" in df.columns
     has_c = "a_ctry" in df.columns
+    has_l6 = "a_l6" in df.columns
 
     def _key(v):
         """A missing categorical is not a category.
@@ -649,6 +863,35 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
 
     def _shrunk(k, n, prior):
         return (k + PSEUDO * prior) / (n + PSEUDO)
+
+    def _sh(k, n, prior):
+        """The same idea with the fighters' own pseudo-count. Never NaN: a
+        debutant's knockout rate is the sport's, which is what anyone who has
+        never seen him would say, rather than a hole or a spurious 0.0."""
+        return (k + SHR_M * prior) / (n + SHR_M)
+
+    def _find(x):
+        r = uf_p.setdefault(x, x)
+        while r != uf_p[r]:
+            r = uf_p[r]
+        while uf_p[x] != r:                      # path compression
+            uf_p[x], x = r, uf_p[x]
+        return r
+
+    def _union(x, y):
+        rx, ry = _find(x), _find(y)
+        if rx == ry:
+            return
+        sx, sy = uf_s.setdefault(rx, 1), uf_s.setdefault(ry, 1)
+        if sx < sy:
+            rx, ry, sx, sy = ry, rx, sy, sx
+        uf_p[ry] = rx
+        uf_s[rx] = sx + sy
+
+    def _usual(f):
+        """The division he has fought in most often so far."""
+        d = div_n.get(f)
+        return max(d, key=d.get) if d else None
 
     def _cos(da, db):
         """Do these two men box in the same places? The cosine of their two
@@ -908,6 +1151,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             arr = np.fromiter(pop, dtype=float, count=len(pop))
             pop_stat[0] = float(arr.mean())
             pop_stat[1] = float(max(arr.std(), 1e-6))
+        # …and the same statistic inside each weight class, which is the point:
+        # the flyweight graph is denser than the heavyweight one, so the same
+        # rating gap is a different fight
+        if i % 2000 == 0:
+            for _k, _dq in pop_div.items():
+                if len(_dq) >= 50:
+                    _ar = np.fromiter(_dq, dtype=float, count=len(_dq))
+                    div_stat[_k] = (float(_ar.mean()), float(max(_ar.std(), 1e-6)))
         ac_, bc_ = getattr(r, "a_ctry", None), getattr(r, "b_ctry", None)
         same_ctry = (float(ac_ == bc_) if isinstance(ac_, str) and isinstance(bc_, str)
                      else np.nan)
@@ -965,6 +1216,87 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             return float(np.mean(vals)) if vals else np.nan
         jc_home = _cp("home", "hn")
         jc_fav = _cp("fav", "n")
+
+        # ---- SHR: the same rates, with the fighters' own pseudo-count -------
+        _gn = sh_glob["n"] or 1.0
+        pi_ko, pi_kd = sh_glob["ko"] / _gn, sh_glob["koed"] / _gn
+        pi_di = sh_glob["dist"] / _gn
+        ko_sa, ko_sb = _sh(ko[a], na, pi_ko), _sh(ko[b], nb, pi_ko)
+        kd_sa, kd_sb = _sh(koed[a], na, pi_kd), _sh(koed[b], nb, pi_kd)
+        di_sa, di_sb = _sh(dist_n[a], na, pi_di), _sh(dist_n[b], nb, pi_di)
+        wr_sa, wr_sb = _sh(wins[a], na, 0.5), _sh(wins[b], nb, 0.5)
+        ow_sa = _sh(opp_wr[a]["s"], opp_wr[a]["n"], 0.5)
+        ow_sb = _sh(opp_wr[b]["s"], opp_wr[b]["n"], 0.5)
+        kos_mn, kos_mx = _mm(ko_sa, ko_sb)
+        kds_mn, kds_mx = _mm(kd_sa, kd_sb)
+        wrs_mn, wrs_mx = _mm(wr_sa, wr_sb)
+        dis_mn, dis_mx = _mm(di_sa, di_sb)
+
+        # ---- GRF: are these two men connected by results at all -------------
+        root_a, root_b = _find(a), _find(b)
+        same_comp = float(root_a == root_b)
+        cmp_mn, cmp_mx = _mm(math.log1p(uf_s.get(root_a, 1)),
+                             math.log1p(uf_s.get(root_b, 1)))
+        # 1 rematch · 2 a common opponent · 3 the transitive comparison ·
+        # 4 connected but further · 6 not connected at all
+        if b in oa:
+            path_len = 1.0
+        elif shared:
+            path_len = 2.0
+        else:
+            path_len = 4.0 if same_comp else 6.0
+            small, big = (oa, ob) if len(oa) <= len(ob) else (ob, oa)
+            if small and big:
+                bigk = set(big)
+                for x in small:
+                    if bigk & opp[x].keys():
+                        path_len = 3.0
+                        break
+        # how MANY such two-step chains there are. Counted over ordered pairs
+        # (x in one man's opponents, y in the other's, x having met y), which is
+        # the same set of pairs read from either corner.
+        link2 = 0
+        if oa and ob:
+            small, big = (oa, ob) if len(oa) <= len(ob) else (ob, oa)
+            bigk = set(big)
+            for x in small:
+                link2 += len(bigk & opp[x].keys())
+        link2 = math.log1p(link2)
+
+        # ---- DIVR: where these ratings sit inside their own weight class ----
+        _ds = div_stat.get(r.div)
+        if _ds:
+            zda = (ea - _ds[0]) / _ds[1]
+            zdb = (eb - _ds[0]) / _ds[1]
+            div_mu, div_sd = _ds
+        else:
+            zda = zdb = div_mu = div_sd = np.nan
+        ezd_mn, ezd_mx = _mm(zda, zdb)
+        _ua, _ub = _usual(a), _usual(b)
+        mu_ua = div_stat.get(_ua, (np.nan, np.nan))[0] if _ua else np.nan
+        mu_ub = div_stat.get(_ub, (np.nan, np.nan))[0] if _ub else np.nan
+
+        # ---- ELO3: the fast member of the family, and its quarrel with the slow
+        efa, efb = elo_fast[a], elo_fast[b]
+        ef_mn, ef_mx = _mm(efa, efb)
+
+        # ---- L6: the form strip, and how much of it our replay never saw.
+        # A parsed page with no strip on a corner is a DEBUTANT, which is a
+        # fact; an unparsed page is a hole. The two are kept apart, because
+        # collapsing them would make "the page exists" readable off a count.
+        l6v = ()
+        if has_l6:
+            _cn6 = getattr(r, "card_n", np.nan)
+            if _cn6 != _cn6:
+                l6v = (np.nan,) * 10 + (0.0,)
+            else:
+                s6a, s6b = _strip(getattr(r, "a_l6", None)), _strip(getattr(r, "b_l6", None))
+                new_a, new_b = max(0.0, s6a[0] - na), max(0.0, s6b[0] - nb)
+                n6_mn, n6_mx = _mm(s6a[0], s6b[0])
+                nw_mn, nw_mx = _mm(new_a, new_b)
+                l6v = (s6a[1] - s6b[1], s6a[2] - s6b[2], s6a[3] - s6b[3],
+                       s6a[4] - s6b[4], s6a[5] - s6b[5],
+                       n6_mn, n6_mx, new_a - new_b, nw_mn, nw_mx, 1.0)
 
         rows.append((
             # ---- BASE
@@ -1102,6 +1434,19 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
             jc_fav, math.tanh((ea - eb) / 200.0) * (jc_fav - 0.5),
             np.log1p(np.mean([p["n"] for p in cpool])) if cpool else np.nan,
             float(bool(cpool)),
+            # ---- SHR
+            ko_sa - ko_sb, kd_sa - kd_sb, di_sa - di_sb, wr_sa - wr_sb,
+            ow_sa - ow_sb,
+            kos_mn, kos_mx, kds_mn, kds_mx, wrs_mn, wrs_mx, dis_mn, dis_mx,
+            # ---- GRF (d_pr, pr_min and pr_max come from pr_ratings)
+            path_len, link2, same_comp, cmp_mn, cmp_mx,
+            # ---- DIVR
+            zda - zdb, ezd_mn, ezd_mx, div_mu, div_sd, mu_ua - mu_ub,
+            # ---- ELO3
+            efa - efb, ef_mn, ef_mx,
+            (efa - efb) - (elo_slow[a] - elo_slow[b]),
+            # ---- L6 (absent unless the snapshot carries the form strips)
+            *l6v,
         ))
 
         # ------------------------------------------------------------- update
@@ -1114,8 +1459,13 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                   else (float(sched) if not np.isnan(sched) else np.nan))
 
         exp = exp_elo
-        elo[a] = ea + ELO_K * (sa - exp)
-        elo[b] = eb + ELO_K * ((1 - sa) - (1 - exp))
+        # a provisional step for a man's first bouts, off by default: every
+        # federation gives a new player a larger K because his rating carries no
+        # evidence yet, and this project never did
+        ka = ELO_K_NEW if (ELO_K_NEW and na < ELO_NEW_UNTIL) else ELO_K
+        kb = ELO_K_NEW if (ELO_K_NEW and nb < ELO_NEW_UNTIL) else ELO_K
+        elo[a] = ea + ka * (sa - exp)
+        elo[b] = eb + kb * ((1 - sa) - (1 - exp))
         peak[a] = max(peak[a], elo[a]); peak[b] = max(peak[b], elo[b])
         # what the ratings expected, against what happened. A 12-0 record built
         # on nobody and a 9-3 record built on contenders look the same in every
@@ -1151,9 +1501,13 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         elo_mov[b] = emb + ELO_K * kmul * ((1 - sa) - (1 - expm))
         esa, esb = elo_slow[a], elo_slow[b]
         exps = 1.0 / (1.0 + 10 ** ((esb - esa) / 400.0))
-        elo_slow[a] = esa + 12.0 * (sa - exps)
-        elo_slow[b] = esb + 12.0 * ((1 - sa) - (1 - exps))
+        elo_slow[a] = esa + ELO_SLOW_K * (sa - exps)
+        elo_slow[b] = esb + ELO_SLOW_K * ((1 - sa) - (1 - exps))
+        expf = 1.0 / (1.0 + 10 ** ((efb - efa) / 400.0))
+        elo_fast[a] = efa + ELO_FAST_K * (sa - expf)
+        elo_fast[b] = efb + ELO_FAST_K * ((1 - sa) - (1 - expf))
         gl.update(a, b, sa, r.dt)
+        _union(a, b)
 
         # opposition quality, one level deeper, measured BEFORE this bout
         sos2_sum[a] += _rate(sos_sum[b], nb, ELO_INIT)
@@ -1286,6 +1640,14 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
                 if tgt is not None:
                     tgt["s"] += v; tgt["n"] += 1
 
+        # the sport's own rates, running and point-in-time, so a 1954 bout is
+        # shrunk toward what boxing looked like in 1954 rather than in 2026
+        sh_glob["n"] += 2.0
+        sh_glob["ko"] += float(stopped)
+        sh_glob["koed"] += float(stopped)
+        sh_glob["dist"] += 2.0 * float(not stopped and not no_verdict)
+        if isinstance(r.div, str) and r.div:
+            pop_div[r.div].append(ea); pop_div[r.div].append(eb)
         pop.append(ea); pop.append(eb)
         seen[a] += 1; seen[b] += 1
         wins[a] += sa >= 1.0; wins[b] += sa <= 0.0
@@ -1318,9 +1680,13 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
     if has_w:
         full = EVERY_C if has_c else (EVERY_O if has_o else (EVERY_S if has_s else EVERY_W))
     full = full + EXTRA
-    merged = set(BT) | set(BTX)
+    if has_l6:
+        full = full + L6
+    merged = set(BT) | set(BTX) | set(PRX)
     out = pd.DataFrame(rows, columns=[c for c in full if c not in merged])
     for k, v in bt_ratings(df).items():
+        out[k] = v
+    for k, v in pr_ratings(df).items():
         out[k] = v
     return out[full]
 

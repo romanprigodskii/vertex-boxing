@@ -54,8 +54,8 @@ def classify(c: str, cols: set[str]) -> tuple[str, str | None]:
 def main() -> None:
     tag = sys.argv[1] if len(sys.argv) > 1 else "card"
     v = F.FEATS_VERSION
-    o = pd.read_parquet(CACHE / f"feats_{tag}_v{v}.parquet")
-    m = pd.read_parquet(CACHE / f"featsmir_{tag}_v{v}.parquet")
+    o = pd.read_parquet(CACHE / F.cache_name("feats", tag))
+    m = pd.read_parquet(CACHE / F.cache_name("featsmir", tag))
     cols = set(o.columns)
     assert cols == set(m.columns), "the two matrices do not have the same columns"
     print(f"{len(o):,} bouts · {len(cols)} columns · feature version {v}\n")

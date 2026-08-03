@@ -96,7 +96,13 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           # the legitimate replacement for `jud`: the card's officials, not the
           # bout's panel. Computed but deliberately outside everyx until it has
           # been measured, exactly as the amateur group was.
-          "judc": F.JUDC}
+          "judc": F.JUDC,
+          # the form strip off the event page — only computable on a snapshot
+          # extended by snapshot_extend.py, and outside everyx until measured
+          "l6": F.L6,
+          # the 2026-08-03 groups, all computed and all outside everyx until
+          # each has been measured on its own
+          "shr": F.SHR, "grf": F.GRF, "divr": F.DIVR, "elo3": F.ELO3}
 
 SETS = {
     "base": F.BASE,
@@ -150,7 +156,7 @@ def build(tag: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     The cache carries the feature-set version in its name: a matrix written by
     an older definition of replay() can never be picked up by a newer one."""
-    fc = CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet"
+    fc = CACHE / F.cache_name("feats", tag)
     dc = CACHE / f"sym_{tag}.parquet"
     if fc.exists() and dc.exists():
         return pd.read_parquet(dc), pd.read_parquet(fc)
@@ -170,7 +176,7 @@ def build_mirror(tag: str, df: pd.DataFrame) -> pd.DataFrame:
     a feature. It is the same replay on the flipped frame — which is exact,
     because every update in replay() treats the two corners alike.
     """
-    fc = CACHE / f"featsmir_{tag}_v{F.FEATS_VERSION}.parquet"
+    fc = CACHE / F.cache_name("featsmir", tag)
     if fc.exists():
         return pd.read_parquet(fc)
     out = df.copy()
@@ -520,7 +526,11 @@ def main() -> None:  # noqa: PLR0915
               "feature_fraction": float(arg("--ff", "0.9")),
               "bagging_fraction": float(arg("--bf", "0.9")), "bagging_freq": 5,
               "lambda_l2": float(arg("--l2", "5.0")),
-              "verbosity": -1, "seed": 42}
+              "verbosity": -1, "seed": 42,
+              # the scoreboard has to be reproducible on a busy machine: see
+              # the same two lines in lab.py, and base-repeat, which is what
+              # found this
+              "force_row_wise": True, "deterministic": True}
     if "--xt" in sys.argv:
         # Extremely randomised splits: the threshold is drawn rather than
         # optimised, which under-fits each tree and decorrelates the ensemble.

@@ -180,7 +180,7 @@ def main() -> None:
     tag = arg("--tag", "weigh")
     n_trials = int(arg("--trials", "400"))
     df = pd.read_parquet(CACHE / f"sym_{tag}.parquet")
-    feats = pd.read_parquet(CACHE / f"feats_{tag}_v{F.FEATS_VERSION}.parquet")
+    feats = pd.read_parquet(CACHE / F.cache_name("feats", tag))
     j = ME.join_odds(df, verbose=False)
     real_cut = pd.Series(j["dt"]).quantile(0.6)
     tune_cut = real_cut - pd.DateOffset(years=int(arg("--back", "3")))
