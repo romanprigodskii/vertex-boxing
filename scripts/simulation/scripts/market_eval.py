@@ -27,7 +27,8 @@ because each is worth about +0.0013, 63 leaves because a 500-trial search could
 not beat it, and `everyx` because the 87 features added on 2026-08-01 are worth
 +0.0025 on the confirmation half of the holdout.
 
-  ./venv/bin/python scripts/market_eval.py --tta --mirror --blend   <- headline
+  ./venv/bin/python scripts/market_eval.py --tag l6 --tta --mirror --xt --blend
+                                                                    <- headline
   ./venv/bin/python scripts/market_eval.py --feats everyc --drop ref --label no-ref
   ./venv/bin/python scripts/market_eval.py --tta --price open --blend --label open
 

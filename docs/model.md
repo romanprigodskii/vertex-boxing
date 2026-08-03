@@ -43,8 +43,17 @@ resolves to it, so the scoreboard reads corpus 0.3342 / premium 0.2820 / quoted
 0.3680 against the market's 0.3469 — a gap of **−0.0211 [−0.0322,−0.0100]**,
 against −0.0240 on the same stack a week ago — and the blend beats the close by
 +0.0043 [+0.0024,+0.0062] at λ 0.17. `--feats everyx` reproduces the old
-scoreboard exactly. Walk-forward retraining has NOT been re-measured on top of
-the block; the −0.0224 in status.md's header was the old set with it.
+scoreboard exactly.
+
+With walk-forward retraining every twelve months on top (`lab.py --tag l6
+--feats everyz --exp deploy --seeds 3`): corpus **0.3324**, confirmation half
+0.3273, premium **0.2810**, quoted **0.3667** — a gap of **−0.0198**, against
+0.3328 / 0.2829 / 0.3693 / −0.0224 for the same protocol on feature version 11.
+That is the best number this project has recorded. It is NOT a paired
+comparison — different feature versions, different runs, and the old one was
+measured on the bench before the two reproducibility fixes — so the evidence for
+the block remains the +0.0023 [+0.0010,+0.0036] on premium above, not the
+difference between −0.0224 and −0.0198.
 
 Measured and dead: the BoxRec form strip (verified pre-bell, 72.4% coverage,
 −0.0007 on the confirmation half), early stopping on the premium slice (−0.0012
