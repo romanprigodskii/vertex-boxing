@@ -5,9 +5,14 @@ training weights and the market blend are flags, so two runs differ by exactly
 what the flag says and by nothing else — the replay is cached per corpus tag.
 
 The DEFAULTS ARE THE BEST KNOWN MODEL, not the historical ones: with
---tta --mirror --xt, corpus 0.3346 / premium 0.2848 / -0.0240 against the close
-and a blend of +0.0040 [+0.0022, +0.0059], measured 2026-08-02 on feature
-version 11.
+--tta --mirror --xt, corpus 0.3342 / premium 0.2820 / **-0.0211** against the
+close and a blend of +0.0043 [+0.0024, +0.0062] at λ 0.17, measured 2026-08-04
+on feature version 15 and the `everyz` set — `everyx` plus the comparability
+block, which is the default here and is worth +0.0023 [+0.0010,+0.0036] on the
+premium holdout in exactly this configuration and nothing outside it.
+
+  --feats everyx   reproduces the 2026-08-02 scoreboard: corpus 0.3346 /
+                   premium 0.2848 / -0.0240 / blend +0.0040 at λ 0.16.
 
 Those are WORSE on the corpus than the 0.3325 published on 2026-08-01 and BETTER
 against the market, because the earlier number contained a post-bell leak.

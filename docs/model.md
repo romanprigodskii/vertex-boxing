@@ -38,6 +38,14 @@ weaker man had under three recorded bouts, and this one pays where the records
 are deep, because comparability only binds when both ratings are estimated from
 something.
 
+It is the default now: `everyz` is `everyx` plus the block and `market_eval.py`
+resolves to it, so the scoreboard reads corpus 0.3342 / premium 0.2820 / quoted
+0.3680 against the market's 0.3469 — a gap of **−0.0211 [−0.0322,−0.0100]**,
+against −0.0240 on the same stack a week ago — and the blend beats the close by
++0.0043 [+0.0024,+0.0062] at λ 0.17. `--feats everyx` reproduces the old
+scoreboard exactly. Walk-forward retraining has NOT been re-measured on top of
+the block; the −0.0224 in status.md's header was the old set with it.
+
 Measured and dead: the BoxRec form strip (verified pre-bell, 72.4% coverage,
 −0.0007 on the confirmation half), early stopping on the premium slice (−0.0012
 on premium itself), retuning Elo's K to its standalone optimum (−0.0008), and
