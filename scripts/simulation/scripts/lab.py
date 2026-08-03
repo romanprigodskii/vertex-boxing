@@ -890,6 +890,16 @@ def main() -> None:
                        "tta": True, "params_over": {"extra_trees": True}},
         "stack-grf": {"feats": "everyx+grf", "mirror_train": True, "tta": True,
                       "params_over": {"extra_trees": True}},
+        "stack-all5": {"feats": "everyx+shr+grf+divr+elo3+whr",
+                       "mirror_train": True, "tta": True,
+                       "params_over": {"extra_trees": True}},
+        "stack-stk": {"feats": "everyx+shr+grf+divr+elo3", "stack": True,
+                      "mirror_train": True, "tta": True,
+                      "params_over": {"extra_trees": True}},
+        # the walk-forward deployment number, with and without the block
+        "deploy-new4": {"feats": "everyx+shr+grf+divr+elo3", "mirror_train": True,
+                        "tta": True, "walk_months": 12,
+                        "params_over": {"extra_trees": True}},
         "x-new5": {"feats": "everyx+shr+grf+divr+elo3+l6"},
         # the graded observation, arriving as a feature instead of as a target
         "x-stack": {"stack": True},

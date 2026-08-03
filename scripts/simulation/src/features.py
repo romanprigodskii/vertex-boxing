@@ -37,7 +37,7 @@ STAGING = ROOT / "imports" / "staging"
 
 # bumped whenever the feature matrix changes, so a cached parquet from an older
 # definition can never be silently reused under a new one
-FEATS_VERSION = 14
+FEATS_VERSION = 15
 
 
 def _envf(name: str, default: float) -> float:
@@ -1051,7 +1051,12 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         touch, which is exactly when a rating difference means least."""
         if not da or not db:
             return np.nan
-        s = sum(da[k] * db[k] for k in (da.keys() & db.keys()))
+        # sorted, not merely intersected: a set of strings iterates in an order
+        # that depends on Python's per-process hash seed, so this sum came out
+        # differing in the last bit between two runs of the same replay — and a
+        # 1e-16 difference in a feature is enough to move a split threshold and
+        # then the holdout by 0.0003. See the same fix on `shared` and `_pool`.
+        s = sum(da[k] * db[k] for k in sorted(da.keys() & db.keys()))
         if s == 0:
             return 0.0
         na_ = math.sqrt(sum(v * v for v in da.values()))
@@ -1123,7 +1128,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         if hn:
             h2h_score = (hs / hn) if pk[0] == a else (1.0 - hs / hn)
         oa, ob = opp[a], opp[b]
-        shared = oa.keys() & ob.keys() if oa and ob else ()
+        shared = sorted(oa.keys() & ob.keys()) if oa and ob else ()
         d_common = np.nan
         if shared:
             d_common = float(np.mean([oa[o][0] / oa[o][1] - ob[o][0] / ob[o][1]
@@ -1358,7 +1363,7 @@ def replay(df: pd.DataFrame) -> pd.DataFrame:  # noqa: PLR0912, PLR0915
         # from any bout on the card whose cards survived. Their tendencies are
         # still read strictly from bouts BEFORE this one — `jud` is updated
         # after the row is written, exactly as the per-bout panel is.
-        cpool = [jud[k] for k in _pool.get(getattr(r, "event_slug", None), ())]
+        cpool = [jud[k] for k in sorted(_pool.get(getattr(r, "event_slug", None), ()))]
         hhc = d_home_true if d_home_true == d_home_true else (
             (ha - hb) if (ha != hb) else np.nan)
 
