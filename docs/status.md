@@ -771,6 +771,38 @@ power-де-вигом. Power перекладывает вероятность �
    где два рейтинга выросли в графах, которые почти не пересекаются, у нас есть
    что сказать сверх цены, а на внутреннем матче — нет.
 
+### 9.6. Чем всё это воспроизводится
+
+```
+# новый скорборд (набор everyz — по умолчанию)
+market_eval.py --tag l6 --tta --mirror --xt --blend --seeds 3
+market_eval.py --tag l6 --tta --mirror --xt --blend --seeds 3 --feats everyx   # прежний
+
+# блок против его отсутствия, в деплойной конфигурации
+lab.py --tag l6 --feats everyx --exp stack-base,stack-new4 --seeds 3
+compare_runs.py --lab stack-base stack-new4
+
+# отрицательные результаты, каждый одной строкой
+lab.py --tag l6 --feats everyx --exp x-l6 --seeds 1              # форм-стрип
+lab.py --tag l6 --feats everyx --exp stop-prem,stop-prem10       # ранняя остановка
+lab.py --tag l6 --feats everyx --exp stack-all5 --seeds 3        # WHR поверх блока
+lab.py --tag l6 --feats everyx --exp stack-stk --seeds 3         # стекинг
+VB_ELO_K=160 VB_ELO_KNEW=320 lab.py --tag l6 --feats everyx --exp base
+
+# тесты корректности и диагностика
+lab.py --tag l6 --feats everyx --exp base,base-repeat --seeds 1  # стенд повторяется
+mirror_check.py l6 · leak_check.py l6 --feats everyz
+rating_scan.py --what elo --tag l6 · lam_slice.py --tag l6 --feats everyx
+regional.py everyz-2026-08-04 --tag l6
+
+# данные: полоски формы с сохранённых страниц → расширенный снапшот
+44_parse_event_extras.py · snapshot_extend.py --from card --to l6
+```
+
+Матрица признаков строится под тег и под настройки рейтингов: `feats_l6_v15`,
+`feats_l6-elo_k160-elo_knew320_v15` и так далее — матрицу, посчитанную при одном
+K, невозможно молча подобрать при другом.
+
 ---
 
 ## 10. Что дальше
