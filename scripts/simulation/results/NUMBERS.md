@@ -81,6 +81,15 @@ Written by `scripts/cite_numbers.py` from the JSON files in this folder. Text di
 | λ, 15+ (fit 1017 / test 1178) | 0.25 | `lambda_by_slice.json · slices[slice=15+]` |
 | λ, same country (fit 841 / test 1164) | 0.01 | `lambda_by_slice.json · slices[slice=same country]` |
 | λ, different countries (fit 1629 / test 2124) | 0.24 | `lambda_by_slice.json · slices[slice=different countries]` |
+| search: candidates screened | 200 | `search.json · n_screened` |
+| search: final configuration under five seeds, window A premium | 0.3174–0.3181 | `search.json · seed_band_A_prem` |
+| search: median candidate, window A premium | 0.3201 | `search_screen.jsonl · ll_A_prem` |
+| search: candidates better than the best seed | 6 | `search_screen.jsonl · ll_A_prem` |
+| search: c0063, lead on A / on unseen premium [99%] / survives | +0.0017 / −0.0004 [−0.0012, +0.0004] / no | `search.json · candidates[id=c0063]` |
+| search: c0098, lead on A / on unseen premium [99%] / survives | +0.0008 / −0.0014 [−0.0031, +0.0002] / no | `search.json · candidates[id=c0098]` |
+| search: c0031, lead on A / on unseen premium [99%] / survives | +0.0008 / −0.0005 [−0.0015, +0.0006] / no | `search.json · candidates[id=c0031]` |
+| search: c0034, lead on A / on unseen premium [99%] / survives | +0.0006 / −0.0014 [−0.0026, −0.0001] / no | `search.json · candidates[id=c0034]` |
+| search: c0159, lead on A / on unseen premium [99%] / survives | +0.0005 / −0.0038 [−0.0058, −0.0019] / no | `search.json · candidates[id=c0159]` |
 | calibration slope, corpus | 1.004 | `calibration.json · corpus.calibration_slope` |
 | calibration slope, premium | 1.009 | `calibration.json · premium.calibration_slope` |
 | calibration slope, quoted | 0.924 | `calibration.json · quoted.calibration_slope` |

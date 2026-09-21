@@ -178,6 +178,25 @@ def main() -> None:  # noqa: PLR0915
             add(f"λ, {r['slice']} (fit {r['n_fit']} / test {r['n_test']})", f"{r['lambda']:.2f}",
                 f"lambda_by_slice.json · slices[slice={r['slice']}]")
 
+    se = load("search.json")
+    if se:
+        import statistics as st
+        screen = [json.loads(x) for x in (R / "search_screen.jsonl").read_text().splitlines()]
+        cands = [x for x in screen if x["id"].startswith("c")]
+        band = se["seed_band_A_prem"]
+        add("search: candidates screened", str(se["n_screened"]), "search.json · n_screened")
+        add("search: final configuration under five seeds, window A premium",
+            f"{band['min']:.4f}–{band['max']:.4f}", "search.json · seed_band_A_prem")
+        add("search: median candidate, window A premium",
+            f"{st.median(x['ll_A_prem'] for x in cands):.4f}", "search_screen.jsonl · ll_A_prem")
+        add("search: candidates better than the best seed",
+            str(sum(x["ll_A_prem"] < band["min"] for x in cands)), "search_screen.jsonl · ll_A_prem")
+        for c in se["candidates"]:
+            add(f"search: {c['id']}, lead on A / on unseen premium [99%] / survives",
+                f"{f4(c['lead_A_prem'])} / {f4(c['delta_B_prem']['delta'])} "
+                f"{ci4(c['delta_B_prem']['ci99'])} / {'yes' if c['survives'] else 'no'}",
+                f"search.json · candidates[id={c['id']}]")
+
     cal = load("calibration.json")
     if cal:
         for k in ("corpus", "premium", "quoted"):
