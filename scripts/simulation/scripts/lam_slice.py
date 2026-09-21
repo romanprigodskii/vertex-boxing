@@ -21,11 +21,12 @@ Two things it must not do, both of which this project has done before:
   * report a slice's λ without its n. Four parameters carved out of 2,472 bouts
     is what killed the band blend, and the same arithmetic applies here.
 
-  ./venv/bin/python scripts/lam_slice.py --tag l6 --feats everyx
+  python3 scripts/lam_slice.py --tag l6 --feats everyz --json results/lambda_by_slice.json
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -102,6 +103,11 @@ def main() -> None:
 
     lam0, _ = fit_lam(lm_mid, lk_mid, y_mid)
     p_bl = 1 / (1 + np.exp(-(lam0 * lm_te + (1 - lam0) * lk_te)))
+    res: dict = {"tag": tag, "feats": fset, "aux_cutoff": str(c1.date()),
+                 "cutoff": str(B.cutoff.date()), "global_lambda": lam0,
+                 "n_fit": int(mid.sum()), "n_test": int(te.sum()),
+                 "ll_market": ll(B.p_mkt[te], y_te), "ll_model": ll(p_te, y_te),
+                 "ll_blend": ll(p_bl, y_te), "slices": []}
     print(f"\nglobal λ {lam0:.2f} on {int(mid.sum()):,} fitting bouts · "
           f"test {int(te.sum()):,}: market {ll(B.p_mkt[te], y_te):.4f} · "
           f"model {ll(p_te, y_te):.4f} · blend {ll(p_bl, y_te):.4f}")
@@ -121,12 +127,20 @@ def main() -> None:
         print(f"{name:24s} {int(m_mid.sum()):6,} {int(m_te.sum()):6,} "
               f"{lam:5.2f} {mk:8.4f} {md:8.4f} {ll(bl, y_te[m_te]):8.4f} "
               f"{mk - ll(bl, y_te[m_te]):+8.4f}")
+        res["slices"].append({"slice": name, "n_fit": int(m_mid.sum()),
+                              "n_test": int(m_te.sum()), "lambda": lam,
+                              "ll_market": mk, "ll_model": md,
+                              "ll_blend": ll(bl, y_te[m_te])})
 
     print("\nRead the λ column, not the gain column: the gain is measured on a "
           "few hundred bouts and moves by more than it is worth. λ is fitted on "
           "the other window and says how much of the model the price does not "
           "already contain, which is the question that decides where to spend "
           "the next feature.")
+    if "--json" in sys.argv:
+        dst = Path(ME.arg("--json", ""))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(json.dumps(res, indent=1) + "\n")
 
 
 if __name__ == "__main__":

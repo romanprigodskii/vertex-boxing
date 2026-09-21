@@ -957,6 +957,12 @@ def main() -> None:  # noqa: PLR0915
     res = CACHE / "market_eval_results.jsonl"
     with res.open("a") as fh:
         fh.write(json.dumps(out) + "\n")
+    # the same record as a file of its own, for results/ — the log above is
+    # append-only scratch, this is the number a document is allowed to cite
+    if "--json" in sys.argv:
+        dst = Path(arg("--json", ""))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(json.dumps(out, indent=1) + "\n")
 
     # Keep the per-bout predictions so two feature sets can be compared to each
     # other by a PAIRED bootstrap on the same bouts, not by eyeballing two

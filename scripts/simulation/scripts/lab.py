@@ -322,6 +322,10 @@ def fit(bench: Bench, cols: list[str], cutoff, *, seeds: int = 1,
         big, y_big, w_big = big[order], y_big[order], w_big[order]
     if weight == "quoted":
         w_big = w_big * np.where(B.prem_all[big], 3.0, 1.0)
+    elif weight.startswith("prem"):
+        # the same population as `quoted` (scheduled 8+ rounds, both men 8+
+        # bouts) at any multiplier, so a search can treat the weight as a knob
+        w_big = w_big * np.where(B.prem_all[big], float(weight[4:] or 3.0), 1.0)
     elif weight.startswith("top"):
         # Tonight's finding says the edge lives on twelve-rounders and title
         # fights. If those are the only bouts we would ever bet, accuracy on the
@@ -654,11 +658,20 @@ def run(bench: Bench, cols: list[str], *, walk_months: int = 0,
     return res
 
 
-def report(name: str, r: dict, base: dict | None) -> None:
+def report(name: str, r: dict, base: dict | None) -> dict:
+    """Print one variant and hand back what was printed: the paired deltas
+    against base, and the variant's own gap to the closing price. Both carry
+    their bootstrap interval, because a level without one is not a result."""
     line = (f"{name:22s} corpus {r['ll_corpus']:.4f}  sel {r['ll_select']:.4f}  "
             f"conf {r['ll_confirm']:.4f}  prem {r['ll_prem']:.4f}  "
             f"quoted {r['ll_quoted']:.4f} (mkt {r['ll_market']:.4f})  "
             f"{r['n_feats']}f {r['n_trees']}t")
+    rec: dict = {}
+    pm = np.clip(BENCH.p_mkt[BENCH.qte], 1e-6, 1 - 1e-6)
+    g = ll(pm, r["_y_q"]) - ll(r["_p_q"], r["_y_q"])
+    glo, ghi = boot_ci(g)
+    rec["gap_to_close"] = {"gap": float(g.mean()), "ci": [float(glo), float(ghi)]}
+    line += f"\n{'':22s}  gap to the close {g.mean():+.4f} [{glo:+.4f},{ghi:+.4f}]"
     if base is not None and base is not r:
         masks = [("select", BENCH.sel), ("confirm", BENCH.conf), ("prem", BENCH.prem)]
         for tag, m in masks:
@@ -667,10 +680,13 @@ def report(name: str, r: dict, base: dict | None) -> None:
             lo, hi = boot_ci(d)
             mark = "+" if lo > 0 else ("-" if hi < 0 else " ")
             line += f"\n{'':22s}  Δ{tag:8s} {d.mean():+.4f} [{lo:+.4f},{hi:+.4f}] {mark}"
+            rec[f"delta_{tag}"] = {"delta": float(d.mean()), "ci": [float(lo), float(hi)]}
         d = ll(base["_p_q"], base["_y_q"]) - ll(r["_p_q"], r["_y_q"])
         lo, hi = boot_ci(d)
         line += f"\n{'':22s}  Δquoted   {d.mean():+.4f} [{lo:+.4f},{hi:+.4f}]"
+        rec["delta_quoted"] = {"delta": float(d.mean()), "ci": [float(lo), float(hi)]}
     print(line, flush=True)
+    return rec
 
 
 BENCH: Bench | None = None
@@ -918,6 +934,11 @@ def main() -> None:
         # twelve months, and the one regulariser that paid
         "deploy": {"mirror_train": True, "tta": True, "walk_months": 12,
                    "params_over": {"extra_trees": True}},
+        # the post-bell leak put back, on the features and bench of the final
+        # model: what it is worth is base minus this, on the same bouts. The
+        # 2026-08-03 figure (+0.0042 on the confirmation half) was measured on
+        # feature version 11 and the frozen `card` snapshot.
+        "leak-back": {"feats": "everyz+jud+offknown"},
         "deploy-noxt": {"mirror_train": True, "tta": True, "walk_months": 12},
         "rot": {"rot": True},
         "rot+tta": {"rot": True, "tta": True},
@@ -946,13 +967,20 @@ def main() -> None:
         r = run(BENCH, c, seeds=kw.pop("seeds", seeds), **kw)
         if base is None:
             base = r
-        report(f"{n} ({time.time() - t0:.0f}s)", r, base)
-        out[n] = {k: v for k, v in r.items() if not k.startswith("_")}
+        rec = report(f"{n} ({time.time() - t0:.0f}s)", r, base)
+        out[n] = {k: v for k, v in r.items() if not k.startswith("_")} | rec
         np.savez(OUT / f"{n}.npz", p_corp=r["_p_corp"], y_corp=r["_y_corp"],
                  p_q=r["_p_q"], y_q=r["_y_q"], key_corp=BENCH.post,
                  prem=BENCH.prem)
     old = json.loads((OUT / "summary.json").read_text()) if (OUT / "summary.json").exists() else {}
     (OUT / "summary.json").write_text(json.dumps({**old, **out}, indent=1))
+    # this run alone, for results/ — summary.json is every variant ever run
+    if "--json" in sys.argv:
+        dst = Path(ME.arg("--json", ""))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(json.dumps({"tag": BENCH.tag, "feats": fset, "seeds": seeds,
+                                   "cutoff": str(BENCH.cutoff.date()), "de_vig": BENCH.dv,
+                                   "variants": out}, indent=1) + "\n")
 
 
 if __name__ == "__main__":

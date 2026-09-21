@@ -21,11 +21,12 @@ CLV is the honest column. ROI on a few hundred bouts tells you nothing; CLV
 converges about twenty times faster, and it is the one number here the model
 earns without ever seeing a price.
 
-  ./venv/bin/python scripts/regional.py v10-mirror
+  python3 scripts/regional.py final-close --tag l6 --json results/level_cut.json
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -96,6 +97,20 @@ def main() -> None:
           f"model {ll(p, y).mean():.4f} · market {ll(pm, y).mean():.4f}\n")
     print("Порог ставки зафиксирован заранее: 2% преимущества по цене открытия.\n")
 
+    res: dict = {"label": label, "tag": tag, "edge_threshold": EDGE,
+                 "n_quoted_test": int(len(y)), "ll_model": float(ll(p, y).mean()),
+                 "ll_market": float(ll(pm, y).mean())}
+
+    def row(name, m):
+        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
+        ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
+        lm, lk = ll(p[m], y[m]).mean(), ll(pm[m], y[m]).mean()
+        print(f"{name:26s} {m.sum():5d} {lm:8.4f} {lk:8.4f} {lm - lk:+8.4f} "
+              f"{n:7d} {c:+8.4f} {ci:>18s} {roi:+7.1%}")
+        return {"slice": name, "bouts": int(m.sum()), "ll_model": float(lm),
+                "ll_market": float(lk), "model_minus_market": float(lm - lk),
+                "bets": n, "clv": c, "clv_ci": [lo, hi], "roi": roi, "roi_ci": [rlo, rhi]}
+
     bands = [("4-6 раундов (клубный)", (sched >= 4) & (sched <= 6)),
              ("8 раундов (регионал)", sched == 8),
              ("10 раундов (нац./конт.)", sched == 10),
@@ -104,15 +119,7 @@ def main() -> None:
     hdr = (f"{'уровень':26s} {'n':>5s} {'модель':>8s} {'рынок':>8s} {'разрыв':>8s} "
            f"{'ставок':>7s} {'CLV':>8s} {'95% интервал':>18s} {'ROI':>8s}")
     print(hdr); print("-" * len(hdr))
-    for name, m in bands:
-        if m.sum() < 25:
-            continue
-        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
-        ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
-        print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
-              f"{ll(pm[m], y[m]).mean():8.4f} "
-              f"{ll(p[m], y[m]).mean() - ll(pm[m], y[m]).mean():+8.4f} "
-              f"{n:7d} {c:+8.4f} {ci:>18s} {roi:+7.1%}")
+    res["by_distance"] = [row(name, m) for name, m in bands if m.sum() >= 25]
 
     # the same cut on how much record the two men carry, which separates a
     # padded prospect's card from a world-level one better than the distance does
@@ -123,16 +130,8 @@ def main() -> None:
               ("15-25", (nt >= 15) & (nt < 25)),
               ("25+", nt >= 25)]
     print(hdr); print("-" * len(hdr))
-    for name, m in bands2:
-        m = m & np.isfinite(nt)
-        if m.sum() < 25:
-            continue
-        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
-        ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
-        print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
-              f"{ll(pm[m], y[m]).mean():8.4f} "
-              f"{ll(p[m], y[m]).mean() - ll(pm[m], y[m]).mean():+8.4f} "
-              f"{n:7d} {c:+8.4f} {ci:>18s} {roi:+7.1%}")
+    res["by_record_depth"] = [row(name, m & np.isfinite(nt)) for name, m in bands2
+                              if (m & np.isfinite(nt)).sum() >= 25]
 
     # a third proxy, independent of both: was a belt on the line, and how big
     # was the card. A finding this consequential should agree from more than
@@ -145,35 +144,36 @@ def main() -> None:
               ("регион./нац. пояс", (tl >= 1) & (tl <= 2)),
               ("конт./межд./мировой", tl >= 3)]
     print(hdr); print("-" * len(hdr))
-    for name, m in bands3:
-        m = np.asarray(m) & np.isfinite(cs)
-        if m.sum() < 25:
-            continue
-        n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
-        ci = f"[{lo:+.4f},{hi:+.4f}]" if np.isfinite(lo) else "—"
-        print(f"{name:26s} {m.sum():5d} {ll(p[m], y[m]).mean():8.4f} "
-              f"{ll(pm[m], y[m]).mean():8.4f} "
-              f"{ll(p[m], y[m]).mean() - ll(pm[m], y[m]).mean():+8.4f} "
-              f"{n:7d} {c:+8.4f} {ci:>18s} {roi:+7.1%}")
+    res["by_belt_and_card"] = [row(name, np.asarray(m) & np.isfinite(cs))
+                               for name, m in bands3
+                               if (np.asarray(m) & np.isfinite(cs)).sum() >= 25]
 
     # What the finding prescribes, end to end: stop betting the bottom of the
     # card. Not a new model — the same predictions, filtered by a level rule
     # that is knowable before the bell and has nothing to do with the price.
     print("\n=== стратегия, которую предписывает находка ===")
     top = (np.nan_to_num(sched, nan=0) >= 10) | (np.nan_to_num(tl, nan=0) >= 1)
-    for name, m in (("ВСЕ котируемые бои", np.ones(len(y), bool)),
-                    ("только 10+ раундов или пояс", top),
-                    ("только 12 раундов или конт./мировой пояс",
-                     (np.nan_to_num(sched, nan=0) >= 12) | (np.nan_to_num(tl, nan=0) >= 3))):
+    res["strategy"] = []
+    for key_, name, m in (("all", "ВСЕ котируемые бои", np.ones(len(y), bool)),
+                          ("ten_plus_or_belt", "только 10+ раундов или пояс", top),
+                          ("upper", "только 12 раундов или конт./мировой пояс",
+                           (np.nan_to_num(sched, nan=0) >= 12) | (np.nan_to_num(tl, nan=0) >= 3))):
         n, c, (lo, hi), roi, (rlo, rhi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m])
         mark = "  ЗНАЧИМО" if rlo > 0 else ""
         print(f"  {name:42s} боёв {m.sum():5d} · ставок {n:5d} · "
               f"CLV {c:+.4f} [{lo:+.4f},{hi:+.4f}] · "
               f"ROI {roi:+.1%} [{rlo:+.1%},{rhi:+.1%}]{mark}")
+        res["strategy"].append({"filter": key_, "bouts": int(m.sum()), "bets": n,
+                                "clv": c, "clv_ci": [lo, hi],
+                                "roi": roi, "roi_ci": [rlo, rhi]})
     print("  CLV — надёжная колонка; ROI на паре сотен ставок сам по себе ничего не значит.")
 
     print("\nЧитать так: тезис верен, если при движении ВНИЗ по уровню разрыв к "
           "закрытию\nсжимается, а CLV растёт. Если наоборот — тезис перевёрнут.")
+    if "--json" in sys.argv:
+        dst = Path(sys.argv[sys.argv.index("--json") + 1])
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(json.dumps(res, indent=1, default=float) + "\n")
 
 
 if __name__ == "__main__":
