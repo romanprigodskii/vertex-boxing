@@ -20,6 +20,7 @@ measured.
 | closing-line value, 4–6 rounders → 12-rounders | +0.0044 → **+0.0180** |
 | the level rule on a window it was never chosen on | upper tier ×2.0 the CLV of the lower: +0.0276 vs +0.0136 |
 | return at the closing price, upper tier | −0.6% (proportional) to **−6.1%** (power de-vig) |
+| a pre-registered random search, 200 configurations | nothing survives on unseen bouts |
 | a post-bell leak caught in the project's own data | P(stoppage) 0.097 vs 0.743 |
 | real bets placed | 0 |
 

@@ -28,6 +28,9 @@ available odds cover, and the claim points the wrong way.
   way of taking the margin out. Priced at the close, the strategy returns −6.1%
   under the de-vig that calibrates the closing price, and −0.6% under the other.
   No real bet was placed; everything here is a backtest.
+- **A pre-registered random search over 200 configurations found nothing** that
+  holds on bouts it had not seen. The final configuration was already the top
+  of that space (section 8).
 - **The project caught a post-bell leak in its own data.** Put back, it is worth
   +0.0038 [+0.0031, +0.0044] on held-out bouts and nothing on priced ones. It
   was removed, and the bench was made to reproduce itself: re-run seven weeks
@@ -345,14 +348,50 @@ numbers is in [`model.md`](model.md) and [`status.md`](status.md).
 - A training target graded by how decisively a bout was won.
 - Stacking auxiliary predictions of stoppage and dominance.
 - Isotonic, Platt and regime-dependent calibration.
-- Hyperparameter search: all of its gain was selection on its own window.
+- Hyperparameter search, twice: a 500-trial TPE search in August, and the
+  pre-registered random search of section 8. Neither found anything that held
+  on unseen bouts.
 - Whole-history rating (BoxRec's own method), built from scratch. Better than Elo
   on its own; +0.0000 on top of the rest.
 - A form strip parsed from event pages.
 - Early stopping on the premium slice.
 - Retuning Elo's K to its standalone optimum.
 
-## 8. What is open
+## 8. A large random search, under a protocol written first
+
+The last thing tried was brute force, set up so that it could not fool us.
+[`search_protocol.md`](search_protocol.md) was written and committed before the
+first fit, and its SHA-256 is stamped into every result. 200 random
+configurations were drawn over leaves, learning rate, leaf size, feature and
+bagging fractions, L2, extremely randomised trees, bins, path smoothing, the
+half-life of the training weights, and up-weighting the priced population. Each
+was trained on bouts up to 10 June 2021 and ranked on 2021–2023.
+
+The final configuration, screened the same way under five seeds, scored
+0.3174–0.3181 on that window's premium bouts. That spread is the noise a
+one-seed screen cannot see through. The median random configuration scored
+0.3201, and six beat the best seed. The top five were then refitted in the full
+deployment stack and scored once on the 2023–2026 holdout, which the search
+never saw (`search.json`, `search_screen.jsonl`):
+
+| candidate | lead where it was chosen | on unseen priced-type bouts [99%] | on the unseen corpus | model − closing price |
+|---|---|---|---|---|
+| `c0063` | +0.0017 | −0.0004 [−0.0012, +0.0004] | −0.0004 | −0.0214 |
+| `c0098` | +0.0008 | −0.0014 [−0.0031, +0.0002] | −0.0018 | −0.0231 |
+| `c0031` | +0.0008 | −0.0005 [−0.0015, +0.0006] | −0.0002 | −0.0229 |
+| `c0034` | +0.0006 | −0.0014 [−0.0026, −0.0001] | −0.0017 | −0.0216 |
+| `c0159` | +0.0005 | −0.0038 [−0.0058, −0.0019] | −0.0018 | −0.0273 |
+| final model | — | — | — | −0.0211 |
+
+**None survives the pre-registered rule.** Every one of the five is worse than
+the final configuration on bouts it had not seen, and two of them are
+significantly worse even at 99%. The best of them led by +0.0017 where it was
+chosen and trailed by 0.0004 where it was not, so the whole of its lead was
+selection. The final configuration was already at the top of this space. More
+candidates would have produced a larger lead on the selection window and the
+same answer on the confirmation, which is why a larger search was not run.
+
+## 9. What is open
 
 - **The unpriced tail cannot be tested.** A club four-rounder that gets a line at
   all is usually a televised prospect's showcase. The anonymous regional card
