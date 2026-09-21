@@ -1,5 +1,7 @@
 # Model — the boxing port
 
+> **The final state is [`REPORT.md`](REPORT.md) (September 2026)**, and the only numbers worth quoting are the ones in `scripts/simulation/results/`. This file is the lab notebook: every pass in the order it happened, including numbers that were later found to carry the post-bell leak (see REPORT.md, section 6).
+
 Adversarially-verified plan (2026-07). The vertexmma model is honest and
 mature; this documents exactly what carries over and what must change. The plan
 below is kept as written; what follows immediately is what actually happened

@@ -1,7 +1,12 @@
 # Data sources
 
-From a 12-agent research sweep (adversarially verified, 2026-07). Interactive
-version: the [build dossier artifact]((a private working note)).
+> **This is the plan from July 2026, kept as written.** What the project
+> actually used is in [`REPORT.md`](REPORT.md), section 1: BoxRec fighter and
+> event pages, Wikipedia record tables and Wikidata for the bouts, ProBoxingOdds
+> for the prices, Polymarket's on-chain history for a price with no margin. The
+> BoxRec track below, described as "not used yet", became the corpus.
+
+From a 12-agent research sweep (adversarially verified, 2026-07).
 
 ## Bootstrap — clean, legal, no anti-bot (pull first)
 | Source | What | Access |
