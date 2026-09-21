@@ -61,16 +61,6 @@ redistributing data derived from it, and the prices are a third party's.
 shown to a reviewer can be checked against what the results were computed from.
 **The data-collection code** is not published for the same reason.
 
-<!-- private-only -->
-## This repository is the private one
-
-It also holds what the public release leaves out: the data collection
-(`scripts/scraper/`, `scripts/odds_scraper/`), the prototype web app (`src/`,
-Next.js on the same database) and its schema (`drizzle/`, `src/lib/db/schema/`).
-The public repository is built from this one by
-`build_public.sh` (history filtered to the research paths; this section removed).
-<!-- /private-only -->
-
 ## Reproducing
 
 With the data in `imports/staging/` (Python 3.12, `pip install -r

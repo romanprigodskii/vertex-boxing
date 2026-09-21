@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env*
+imports/
+scripts/simulation/logs/
+scripts/simulation/data/
+scripts/simulation/artifacts/
+scripts/simulation/catboost_info/
