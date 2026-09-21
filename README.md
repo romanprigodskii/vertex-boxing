@@ -1,48 +1,99 @@
 # Vertex Boxing
 
-AI-powered boxing fight-prediction platform — a port of [vertexmma](../vertexmma).
-Predicts professional boxing bouts and grades the model against the closing
-betting line, with the thesis that **soft regional/undercard markets** leave
-room for a fundamentals model to find edge (where the razor-sharp UFC market
-does not).
+A fundamentals model of professional boxing, scored against the bookmaker's
+closing line. It was built to test one thesis: that regional and club boxing
+lines are soft enough for a model that reads records and ratings to find room.
+**The data says the opposite**, and this repository is the record of how that was
+measured.
 
-> **This is a falsifiable research bet, not a funded edge.** Success is measured
-> as **closing-line value on competitive fights**, not accuracy — the ~90–95 %
-> favorite base rate on regional cards makes accuracy meaningless. Run the
-> [kill-test](scripts/simulation/README.md) before building the full pipeline.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/clv_by_distance-dark.svg">
+  <img alt="Closing-line value by scheduled distance: +0.0044 on 4–6 rounders, +0.0075 on 8, +0.0093 on 10, +0.0180 on 12, each with a 95% interval" src="docs/figures/clv_by_distance-light.svg" width="720">
+</picture>
 
-## Stack
-- **Next.js + TypeScript** web app (to be built) · **Drizzle ORM** + **Supabase** (Postgres)
-- **Python** ingestion (`httpx` + `BeautifulSoup`) and modeling (LightGBM + CatBoost)
+| | |
+|---|---|
+| model against the closing line, 3,288 priced bouts | **−0.0211** [−0.0322, −0.0100] nats |
+| the same, retrained yearly as a deployment would be | −0.0198 [−0.0311, −0.0086] |
+| the model blended into the closing price, λ = 0.17 | **+0.0043** [+0.0024, +0.0062] |
+| model against the *opening* line | −0.0089 [−0.0206, +0.0026] |
+| closing-line value, 4–6 rounders → 12-rounders | +0.0044 → **+0.0180** |
+| the level rule on a window it was never chosen on | upper tier ×2.0 the CLV of the lower: +0.0276 vs +0.0136 |
+| return at the closing price, upper tier | −0.6% (proportional) to **−6.1%** (power de-vig) |
+| a post-bell leak caught in the project's own data | P(stoppage) 0.097 vs 0.743 |
+| real bets placed | 0 |
 
-## Data — open sources only (for now)
-BoxRec has the regional long tail but is Cloudflare-walled and its ToS forbids
-extraction/redistribution, so the bootstrap uses clean, license-safe sources:
-Wikidata (identity + BoxRec-ID crosswalk), DBpedia (record summaries),
-Wikipedia record tables (fight-by-fight), boxing-data.com API, Kaggle dumps
-(prototype only), plus The Odds API + ProBoxingOdds for the market line.
-See [`docs/data-sources.md`](docs/data-sources.md).
+On its own the model loses to the close. Blended into the price, it improves the
+price, so it knows something the price does not. And it knows it at the **top**
+of the sport, not the bottom: closing-line value rises with the scheduled
+distance, and three independent markers of level agree. The margin paid at the
+open is larger than the movement the model catches, so none of this is money.
 
-## Model
-Ports the leak-free point-in-time replay, Elo/Glicko-2, strength-of-schedule
-aggregates, ensemble and calibration; drops the per-round punch-stat features
-(no free CompuBox equivalent); goes 3-outcome (win/draw/loss); adds
-boxing-specific signals (padded-record detection, hometown/venue decision bias,
-title level, amateur pedigree). See [`docs/model.md`](docs/model.md).
+**Read [`docs/REPORT.md`](docs/REPORT.md)**: the question, the data, the model,
+the protocol, every result with its interval, the leak, and the dead ends.
 
-## Layout
+## What is here
+
 ```
-src/lib/db/schema/     # Drizzle schema (fighters, events/bouts, odds, rankings, predictions)
-scripts/scraper/       # open-source data ingestion
-scripts/odds_scraper/  # betting lines (the yardstick)
-scripts/simulation/    # the model + the kill-test
-docs/                  # model & data-source rationale
+docs/REPORT.md               the final report — start here
+docs/model.md                the lab notebook, in English (every pass, every dead end)
+docs/status.md               the lab notebook, in Russian (the 2026-08-04 state in detail)
+docs/odds.md                 where historical boxing prices exist, and where they do not
+scripts/simulation/
+  src/features.py            the point-in-time replay: 231 features, both orientations
+  scripts/market_eval.py     the scoreboard: model vs the closing line, and the blend
+  scripts/lab.py             the bench: many variants, one paired verdict each
+  scripts/regional.py        the level cut
+  scripts/rule_oos.py        the level rule on an era it never saw
+  scripts/clv_money.py       closing-line value into money, margin included
+  scripts/leak_check.py      does any feature say how the fight ended?
+  scripts/mirror_check.py    does every feature mirror when the corners swap?
+  reproduce.sh               every number in the report, one command
+  results/                   what reproduce.sh wrote — the files the report cites
 ```
 
-## Setup
+## What is not here, and why
+
+**The data.** The corpus of 413,279 bouts was assembled from BoxRec, Wikipedia
+and Wikidata, and the prices come from ProBoxingOdds. BoxRec's terms forbid
+redistributing data derived from it, and the prices are a third party's.
+`results/data_manifest.json` holds the SHA-256 of every input file, so a copy
+shown to a reviewer can be checked against what the results were computed from.
+**The data-collection code** is not published for the same reason.
+
+<!-- private-only -->
+## This repository is the private one
+
+It also holds what the public release leaves out: the data collection
+(`scripts/scraper/`, `scripts/odds_scraper/`), the prototype web app (`src/`,
+Next.js on the same database) and its schema (`drizzle/`, `src/lib/db/schema/`).
+The public repository is built from this one by
+`build_public.sh` (history filtered to the research paths; this section removed).
+<!-- /private-only -->
+
+## Reproducing
+
+With the data in `imports/staging/` (Python 3.12, `pip install -r
+scripts/simulation/requirements.txt`):
+
 ```bash
-pnpm install
-cp .env.example .env.local   # DATABASE_URL + Supabase + ingestion keys
-pnpm db:push                 # apply the schema
+cd scripts/simulation
+./reproduce.sh              # about 2.5 hours on an 8-core M3
+./reproduce.sh level_cut    # one step
 ```
-Then per-package Python venvs — see each `scripts/*/README.md`.
+
+The bench is deterministic: LightGBM is pinned to one histogram code path, the
+replay sorts every set it sums over, and every bootstrap is seeded. Re-run on
+2026-09-21, the scoreboard published on 2026-08-04 came back identical in every
+field to 16 significant digits. The library versions are pinned in
+`requirements.txt` and recorded in `results/environment.json`.
+
+## Status
+
+Concluded as research, September 2026. The one experiment that could still
+change the money answer, and that history cannot run, is a forward test:
+publishing predictions before the bell and grading them against prices that were
+live at the time.
+
+Code: MIT. Part of [prigodskii.dev](https://prigodskii.dev); the MMA system this
+was ported from is [Vertex MMA](https://github.com/romanprigodskii/vertex-mma).

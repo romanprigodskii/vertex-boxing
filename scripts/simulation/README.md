@@ -1,45 +1,46 @@
-# Vertex Boxing — model
+# Vertex Boxing — the model and the bench
 
-A port of the vertexmma bout-outcome model to boxing. The spine is identical;
-the sport-specific parts differ. Read `docs/model.md` at the repo root for the
-full "what ports / what dies / what's new" rationale.
+What the model is, how it is scored, and what it found:
+[`docs/REPORT.md`](../../docs/REPORT.md). This file is the map of the code.
 
-## What ports unchanged
-- Point-in-time, **leak-free** chronological replay (snapshot each fighter's
-  aggregates strictly BEFORE the bout).
-- Elo (K=32) + Glicko-2 conservative (rating − 2·RD); optionally WHR.
-- Opponent-quality / strength-of-schedule aggregates — the **core** boxing
-  signal (padded/protected records).
-- LightGBM + CatBoost + LogReg + blender; A/B symmetrization; temporal split;
-  rolling backtest.
-- Closing line is **eval-only**, never a feature.
+## The model
 
-## What changes for boxing
-- **3-outcome** target (win / draw / loss), multiclass. Evaluate with RPS +
-  multiclass log-loss, and CLV on the competitive subset.
-- **Drop** the per-round attack/defense skill ratings (no free punch data).
-- Method taxonomy KO/TKO/UD/SD/MD/PTS/RTD/DQ (no submissions).
-- Variable scheduled rounds (4/6/8/10/12) as a class proxy; re-fit age curve.
-- New features: padded-record/SoS detector, opponent-adjusted KO power vs chin,
-  hometown/venue decision bias × P(decision), activity/ring-rust, title level,
-  amateur/Olympic pedigree, southpaw matchup, explicit draw sub-model.
+`src/features.py` is the whole of it. `load(tag)` reads a frozen corpus snapshot,
+`symmetrize()` flips a deterministic half of the bouts so that corner A is not
+the winner 87% of the time, and `replay()` walks the corpus in date order and
+writes, for every bout, what was known about both men before its first bell:
+ratings, records, strength of schedule, activity, the level of the bout, the
+officials on the card, and the comparability block. Feature sets are named in
+`market_eval.py` (`everyz` is the final one, 231 columns). The matrices are
+cached per snapshot tag and feature version, so a matrix built by an older
+`replay()` can never be picked up by a newer one.
 
-## The kill-test (run FIRST)
-`scripts/run_killtest.py` — replay leak-free, join historical closing odds,
-and check for **positive CLV on competitive fights (implied 30–70 %)**. If
-there's no edge there, the thesis fails regardless of headline accuracy. Run
-this on the open-source bootstrap before building the full BoxRec pipeline.
+The model itself is a LightGBM binary classifier trained on both orientations
+of every bout, averaged over both at prediction time, with extremely randomised
+trees, a six-year half-life on training weights and three seeds.
 
-## Layout (to be filled in the model step)
-```
-src/
-  config.py           # version, split, params, competitive band   [done]
-  db.py               # psycopg connection
-  export.py           # raw -> leak-free per-bout feature rows (3-outcome)
-  opponent_ratings.py # Elo + Glicko-2 + SoS aggregates (no punch stats)
-  features.py         # row -> A/B diff matrix
-  ensemble.py         # LGBM + CatBoost + LogReg + blender (multiclass)
-  train.py / predict.py
-scripts/
-  run_train.py  run_predict.py  run_killtest.py
-```
+## The scripts that produce the published numbers
+
+| script | what it answers |
+|---|---|
+| `market_eval.py` | the scoreboard: the model and the blend against one reading of the market's price |
+| `lab.py` | the bench: many variants on one data load, each against a base by a paired bootstrap; also the yearly walk-forward deployment |
+| `regional.py` | closing-line value and return cut by the level of the bout |
+| `rule_oos.py` | the level rule applied, unedited, to an era it was never chosen on |
+| `clv_money.py` | closing-line value turned into money, margin included, under both de-vig methods |
+| `lam_slice.py` | the blend weight fitted inside slices known before the bell |
+| `calibration.py`, `where.py`, `polymarket_eval.py` | calibration, where the gap sits, and a price with no margin |
+| `board_margin.py`, `feed_check.py` | the margin in each reading of the board; why the merged price feed is not used |
+| `leak_check.py`, `mirror_check.py` | correctness: no feature may say how the fight ended; every feature must mirror |
+| `search.py` | the random search of `docs/search_protocol.md`, a separate experiment with its own rules |
+| `figures.py`, `cite_numbers.py` | the report's figure, and the table of every published number with its source |
+
+`reproduce.sh` runs them in order and writes `results/`.
+
+## The rest
+
+The other scripts are the lab notebook in code: each one measured something
+recorded in `docs/model.md` or `docs/status.md`, most of it a dead end. They are
+kept because a negative result is only checkable if the code that produced it
+is. `snapshot_corpus.py` and `snapshot_extend.py` build the frozen snapshots
+from the project's database, which is not public.
