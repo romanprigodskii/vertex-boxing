@@ -1,0 +1,48 @@
+{
+ "base": "final-close",
+ "merged": "final-close-allodds",
+ "n_base": 3288,
+ "n_merged": 3705,
+ "n_shared": 3288,
+ "n_added": 417,
+ "gap_merged": -0.0021113255315314884,
+ "gap_contribution_shared": -0.011823008098044298,
+ "gap_contribution_added": 0.00971168256651281,
+ "shared": {
+  "market_base": 0.34692466501710256,
+  "market_merged": 0.3553959828841648,
+  "identical_close_share": 0.9695863746958637
+ },
+ "changed_by_source": {
+  "oddsportal+proboxingodds": {
+   "n": 49,
+   "favourite_flipped": 0.3673469387755102,
+   "market_base": 0.4539960343072368,
+   "market_merged": 1.008613764113517,
+   "base_favourite_won_when_flipped": 0.7777777777777778
+  },
+  "proboxingodds": {
+   "n": 51,
+   "favourite_flipped": 0.0,
+   "market_base": 0.11373327876235431,
+   "market_merged": 0.12701610986809342
+  }
+ },
+ "added_by_source": {
+  "oddsportal": {
+   "n": 37,
+   "market": 1.0219058697817704,
+   "model": 0.326470345454264
+  },
+  "oddsportal+proboxingodds": {
+   "n": 38,
+   "market": 0.6724644890919791,
+   "model": 0.29003684617844083
+  },
+  "proboxingodds": {
+   "n": 342,
+   "market": 0.1848235256993042,
+   "model": 0.1973427681610066
+  }
+ }
+}

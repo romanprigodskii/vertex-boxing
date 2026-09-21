@@ -1,0 +1,20 @@
+{
+ "close": {
+  "bouts": 3288,
+  "overround_mean": 1.0728853428773022,
+  "overround_median": 1.0711199216206146,
+  "margin_mean": 0.0728853428773022
+ },
+ "best": {
+  "bouts": 3288,
+  "overround_mean": 1.030203231550237,
+  "overround_median": 1.031642863251518,
+  "margin_mean": 0.030203231550236964
+ },
+ "open": {
+  "bouts": 3288,
+  "overround_mean": 1.0559426887537542,
+  "overround_median": 1.056084918213993,
+  "margin_mean": 0.05594268875375419
+ }
+}

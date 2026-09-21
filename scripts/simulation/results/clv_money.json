@@ -1,0 +1,289 @@
+{
+ "label": "final-close",
+ "tag": "l6",
+ "edge_threshold": 0.02,
+ "n_quoted_test": 3288,
+ "n_upper": 1134,
+ "by_method": {
+  "proportional": {
+   "all_quoted": {
+    "bets": 2048,
+    "roi": 0.035907666015625,
+    "roi_ci": [
+     -0.02166113159179687,
+     0.09451756591796875
+    ],
+    "roi_at_close": -0.01444428914191429,
+    "roi_at_close_ci": [
+     -0.02164040260188009,
+     -0.007606989289791862
+    ],
+    "difference": 0.05035195515753929,
+    "difference_ci": [
+     -0.005701911429596659,
+     0.10845465634862402
+    ]
+   },
+   "upper_tier": {
+    "bets": 803,
+    "roi": 0.08692976338729765,
+    "roi_ci": [
+     -0.00011738169364882109,
+     0.17956376400996268
+    ],
+    "roi_at_close": -0.005740739976103853,
+    "roi_at_close_ci": [
+     -0.018535572971942055,
+     0.008503609912843147
+    ],
+    "difference": 0.09267050336340149,
+    "difference_ci": [
+     0.00675772501214186,
+     0.18663416093924007
+    ]
+   },
+   "upper_arithmetic": {
+    "bets": 803,
+    "we_pay": 0.5735659522149475,
+    "open_fair": 0.5422815120806114,
+    "book_keeps": 0.03128444013433621,
+    "close_fair": 0.5566278233159231,
+    "clv": 0.014346311235311724,
+    "clv_ci": [
+     0.010405032192184594,
+     0.018235995756209277
+    ],
+    "net": -0.01693812889902449
+   }
+  },
+  "power": {
+   "all_quoted": {
+    "bets": 2048,
+    "roi": 0.035907666015625,
+    "roi_ci": [
+     -0.02166113159179687,
+     0.09451756591796875
+    ],
+    "roi_at_close": -0.07552247573844373,
+    "roi_at_close_ci": [
+     -0.08454799292499947,
+     -0.06638840467248446
+    ],
+    "difference": 0.11143014175406873,
+    "difference_ci": [
+     0.056328369571714706,
+     0.16898868536081552
+    ]
+   },
+   "upper_tier": {
+    "bets": 803,
+    "roi": 0.08692976338729765,
+    "roi_ci": [
+     -0.00011738169364882109,
+     0.17956376400996268
+    ],
+    "roi_at_close": -0.060500726526581776,
+    "roi_at_close_ci": [
+     -0.07676647089313322,
+     -0.04377698415936872
+    ],
+    "difference": 0.1474304899138794,
+    "difference_ci": [
+     0.06152099909606263,
+     0.24031949461285276
+    ]
+   },
+   "upper_arithmetic": {
+    "bets": 803,
+    "we_pay": 0.5735659522149475,
+    "open_fair": 0.5460376773805297,
+    "book_keeps": 0.0275282748344179,
+    "close_fair": 0.5640762575931235,
+    "clv": 0.018038580212593917,
+    "clv_ci": [
+     0.013440171339943336,
+     0.022455619628601466
+    ],
+    "net": -0.009489694621823986
+   }
+  }
+ },
+ "upper_by_price": [
+  {
+   "price": "<2",
+   "bets": 466,
+   "realised ROI": 0.05949484978540772,
+   "share of spread": 0.08036924369861728,
+   "keeps (prop)": 0.04328362342758133,
+   "CLV (prop)": 0.010534644032161698,
+   "ROI at close (prop)": -0.040892288193991405,
+   "keeps (powe)": 0.019618301607232446,
+   "CLV (powe)": 0.022415661052951442,
+   "ROI at close (powe)": 0.001483375797293656
+  },
+  {
+   "price": "2-3",
+   "bets": 109,
+   "realised ROI": 0.22981651376146792,
+   "share of spread": 0.1144451931073173,
+   "keeps (prop)": 0.02271071368847022,
+   "CLV (prop)": 0.01757631873358393,
+   "ROI at close (prop)": -0.010254367488831654,
+   "keeps (powe)": 0.03280927446931476,
+   "CLV (powe)": 0.015169693939482538,
+   "ROI at close (powe)": -0.04258501198636105
+  },
+  {
+   "price": "3-5",
+   "bets": 105,
+   "realised ROI": 0.23076190476190478,
+   "share of spread": 0.24317846038805688,
+   "keeps (prop)": 0.014750720065396973,
+   "CLV (prop)": 0.025212869688009166,
+   "ROI at close (prop)": 0.042976956587964694,
+   "keeps (powe)": 0.03980134787548539,
+   "CLV (powe)": 0.017957905855875544,
+   "ROI at close (powe)": -0.08744404832952957
+  },
+  {
+   "price": "5+",
+   "bets": 123,
+   "realised ROI": -0.05853658536585367,
+   "share of spread": 0.5569659534523665,
+   "keeps (prop)": 0.007536126111456453,
+   "CLV (prop)": 0.016648567022490665,
+   "ROI at close (prop)": 0.08984664806613785,
+   "keeps (powe)": 0.04233921706492666,
+   "CLV (powe)": 0.00406670817696758,
+   "ROI at close (powe)": -0.28821093610788656
+  }
+ ],
+ "halves": {
+  "split": "2024-11-08",
+  "early_half": {
+   "bets": 432,
+   "roi": 0.13308171296296298,
+   "roi_ci": [
+    0.010680729166666663,
+    0.2573233391203705
+   ],
+   "roi_at_close": -0.0398713054885733,
+   "roi_at_close_ci": [
+    -0.06295729957656265,
+    -0.015685814691412295
+   ],
+   "difference": 0.17295301845153624,
+   "difference_ci": [
+    0.051248359957952315,
+    0.294291254451097
+   ]
+  },
+  "late_half": {
+   "bets": 371,
+   "roi": 0.03318948787061997,
+   "roi_ci": [
+    -0.09561952156334233,
+    0.1809253234501348
+   ],
+   "roi_at_close": -0.08452204698054311,
+   "roi_at_close_ci": [
+    -0.10593361610379433,
+    -0.06467555453433754
+   ],
+   "difference": 0.11771153485116305,
+   "difference_ci": [
+    -0.009975691434551624,
+    0.2659796990491668
+   ]
+  }
+ },
+ "tighter_board": {
+  "overround_mean": 1.0579895549718652,
+  "overround_median": 1.0577110581610696,
+  "rows": [
+   {
+    "method": "proportional",
+    "overround": "actual",
+    "roi_at_close": -0.005740739976103863,
+    "roi_at_close_favourites": -0.03993689611086657
+   },
+   {
+    "method": "proportional",
+    "overround": "1.050",
+    "roi_at_close": 0.0016565226379122318,
+    "roi_at_close_favourites": -0.032985057527119804
+   },
+   {
+    "method": "proportional",
+    "overround": "1.040",
+    "roi_at_close": 0.01128783535558447,
+    "roi_at_close_favourites": -0.023686836926419038
+   },
+   {
+    "method": "proportional",
+    "overround": "1.030",
+    "roi_at_close": 0.02110616385418239,
+    "roi_at_close_favourites": -0.014208068352889118
+   },
+   {
+    "method": "proportional",
+    "overround": "1.020",
+    "roi_at_close": 0.031117008597850857,
+    "roi_at_close_favourites": -0.004543441572035076
+   },
+   {
+    "method": "power",
+    "overround": "actual",
+    "roi_at_close": -0.0605007265265756,
+    "roi_at_close_favourites": 0.0027259134204179057
+   },
+   {
+    "method": "power",
+    "overround": "1.050",
+    "roi_at_close": -0.04992511222343269,
+    "roi_at_close_favourites": 0.006267734445040597
+   },
+   {
+    "method": "power",
+    "overround": "1.040",
+    "roi_at_close": -0.034702970645728526,
+    "roi_at_close_favourites": 0.01074003410491749
+   },
+   {
+    "method": "power",
+    "overround": "1.030",
+    "roi_at_close": -0.01813029230567568,
+    "roi_at_close_favourites": 0.015335842853550719
+   },
+   {
+    "method": "power",
+    "overround": "1.020",
+    "roi_at_close": 0.00010884293032904076,
+    "roi_at_close_favourites": 0.020062777894108638
+   }
+  ]
+ },
+ "closing_board_readings": [
+  {
+   "reading": "worst end (close_*)",
+   "bets": 803,
+   "overround": 1.081667326836519,
+   "roi_at_close_proportional": -0.005740739976103853,
+   "roi_at_close_power": -0.060500726526581776
+  },
+  {
+   "reading": "mid of the range",
+   "bets": 803,
+   "overround": 1.0522183858016976,
+   "roi_at_close_proportional": -0.01519496826662257,
+   "roi_at_close_power": -0.0517900321915114
+  },
+  {
+   "reading": "best end (best_*)",
+   "bets": 803,
+   "overround": 1.0227694447668763,
+   "roi_at_close_proportional": -0.025330924742427416,
+   "roi_at_close_power": -0.04469394907612875
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "python": "3.12.8",
+ "machine": "arm64",
+ "numpy": "2.2.3",
+ "pandas": "2.2.3",
+ "scipy": "1.18.1",
+ "sklearn": "1.9.0",
+ "lightgbm": "4.7.0",
+ "pyarrow": "24.0.0"
+}

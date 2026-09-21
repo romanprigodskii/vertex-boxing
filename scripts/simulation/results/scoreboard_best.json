@@ -1,0 +1,35 @@
+{
+ "label": "final-best",
+ "tag": "l6",
+ "feats": "everyz",
+ "calib": "none",
+ "devig": "power",
+ "devig_slope": 1.0707552053724412,
+ "price": "best",
+ "weight": "none",
+ "n_test": 3288,
+ "n_train_quoted": 4973,
+ "ll_model": 0.36798655149669524,
+ "ll_market": 0.34777115866930297,
+ "gap": -0.020215392827392258,
+ "ci": [
+  -0.0313399276730998,
+  -0.009119492710205993
+ ],
+ "ll_corpus": 0.3342017304261689,
+ "n_corpus_test": 89087,
+ "ll_prem": 0.2820173200983651,
+ "n_prem": 12536,
+ "halflife": 6.0,
+ "seeds": 3,
+ "n_corpus": 413279,
+ "trees": 2470,
+ "blend_w_model": 0.18,
+ "blend_w_market": 0.8200000000000001,
+ "ll_blend": 0.34308182760990547,
+ "blend_gap": 0.004689331059397495,
+ "blend_ci": [
+  0.002680421711436597,
+  0.006720332929616552
+ ]
+}

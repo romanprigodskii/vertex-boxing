@@ -1,0 +1,131 @@
+{
+ "tag": "l6",
+ "feats": "everyz",
+ "aux_cutoff": "2020-06-10",
+ "cutoff": "2023-06-10",
+ "global_lambda": 0.15,
+ "n_fit": 2472,
+ "n_test": 3288,
+ "ll_market": 0.34692466501710256,
+ "ll_model": 0.3712586126857525,
+ "ll_blend": 0.34331310602603543,
+ "slices": [
+  {
+   "slice": "distance \u22646",
+   "n_fit": 556,
+   "n_test": 882,
+   "lambda": 0.0,
+   "ll_market": 0.2478741634524813,
+   "ll_model": 0.2785934211689547,
+   "ll_blend": 0.24787416345248134
+  },
+  {
+   "slice": "distance 8",
+   "n_fit": 444,
+   "n_test": 582,
+   "lambda": 0.32,
+   "ll_market": 0.29802737595717016,
+   "ll_model": 0.30160227538966605,
+   "ll_blend": 0.29073385116411243
+  },
+  {
+   "slice": "distance 10",
+   "n_fit": 945,
+   "n_test": 1195,
+   "lambda": 0.2,
+   "ll_market": 0.3668545035330243,
+   "ll_model": 0.3964876325231388,
+   "ll_blend": 0.363910700457488
+  },
+  {
+   "slice": "distance 12",
+   "n_fit": 526,
+   "n_test": 629,
+   "lambda": 0.19,
+   "ll_market": 0.49319590124341456,
+   "ll_model": 0.5177164958629565,
+   "ll_blend": 0.4857587911954009
+  },
+  {
+   "slice": "no belt",
+   "n_fit": 1467,
+   "n_test": 1946,
+   "lambda": 0.13,
+   "ll_market": 0.27837651855283935,
+   "ll_model": 0.2999544150386049,
+   "ll_blend": 0.2755522417642599
+  },
+  {
+   "slice": "regional/national belt",
+   "n_fit": 311,
+   "n_test": 378,
+   "lambda": 0.39,
+   "ll_market": 0.47434716974009955,
+   "ll_model": 0.5121794319036533,
+   "ll_blend": 0.474807253417894
+  },
+  {
+   "slice": "continental/world belt",
+   "n_fit": 694,
+   "n_test": 964,
+   "lambda": 0.09,
+   "ll_market": 0.4353364764633302,
+   "ll_model": 0.4599410804834524,
+   "ll_blend": 0.43181333932091465
+  },
+  {
+   "slice": "thinner man <3 bouts",
+   "n_fit": 174,
+   "n_test": 209,
+   "lambda": 0.0,
+   "ll_market": 0.13578173241703062,
+   "ll_model": 0.22083446339903037,
+   "ll_blend": 0.13578173241703062
+  },
+  {
+   "slice": "3\u20138",
+   "n_fit": 444,
+   "n_test": 657,
+   "lambda": 0.06,
+   "ll_market": 0.3002100847199563,
+   "ll_model": 0.31728936504468425,
+   "ll_blend": 0.29846904687595915
+  },
+  {
+   "slice": "8\u201315",
+   "n_fit": 837,
+   "n_test": 1244,
+   "lambda": 0.21,
+   "ll_market": 0.3643064023514764,
+   "ll_model": 0.3940199725472526,
+   "ll_blend": 0.36189756941108714
+  },
+  {
+   "slice": "15+",
+   "n_fit": 1017,
+   "n_test": 1178,
+   "lambda": 0.25,
+   "ll_market": 0.39208380841666046,
+   "ll_model": 0.40401015023532866,
+   "ll_blend": 0.3836097297673745
+  },
+  {
+   "slice": "same country",
+   "n_fit": 841,
+   "n_test": 1164,
+   "lambda": 0.01,
+   "ll_market": 0.4014631763497893,
+   "ll_model": 0.4402323377871712,
+   "ll_blend": 0.40130970369453184
+  },
+  {
+   "slice": "different countries",
+   "n_fit": 1629,
+   "n_test": 2124,
+   "lambda": 0.24,
+   "ll_market": 0.31703632829805956,
+   "ll_model": 0.3334594526019242,
+   "ll_blend": 0.31047996169114933
+  }
+ ]
+}

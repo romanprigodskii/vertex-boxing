@@ -1,0 +1,35 @@
+{
+ "note": "The data is not published (see docs/REPORT.md, Data). These digests identify the exact files the results were computed from, so a copy shown to a reviewer can be checked against them.",
+ "files": {
+  "corpus_l6.parquet": {
+   "sha256": "de7b73b4f59e373abc764c70934c15821799cf382a8dfffd0cbb57df1e7fd8fe",
+   "bytes": 60523233,
+   "what": "the frozen corpus snapshot every number is measured on"
+  },
+  "sym_l6.parquet": {
+   "sha256": "2c35d3a2b7a8945a2da1a91bb798602869367279816360bae423ce2ea64275c0",
+   "bytes": 62858869,
+   "what": "the same corpus, corners symmetrised (a deterministic half flipped)"
+  },
+  "feats_l6_v15.parquet": {
+   "sha256": "fad993ae783305fe422ae941f335972199964707fab67ec49bbf809307e4da1a",
+   "bytes": 349919597,
+   "what": "the feature matrix, feature version 15"
+  },
+  "featsmir_l6_v15.parquet": {
+   "sha256": "929ee19de19d20bc6c5903d55d58a7e1004e51730dbf1f810265e4798c078e62",
+   "bytes": 349921394,
+   "what": "the same matrix with the corners exchanged"
+  },
+  "proboxingodds_v2.parquet": {
+   "sha256": "92072eaf8a10d04d591c51cda0f2d0cf2941af045da8cc6ac426f86412d6cb46",
+   "bytes": 542502,
+   "what": "opening, closing and best-of-board moneylines"
+  },
+  "polymarket_boxing.parquet": {
+   "sha256": "3e4a0dfeae44f8b1a5d80086a2b666e2a3d7e43d02b74133ecaf87608ccceea5",
+   "bytes": 1681923,
+   "what": "Polymarket boxing trades, from the on-chain history"
+  }
+ }
+}

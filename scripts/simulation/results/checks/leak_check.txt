@@ -1,0 +1,45 @@
+scoring the everyz feature set: 231 of 260 columns (--all for every column)
+
+395,071 decisive bouts · A wins 0.5003 (symmetrisation is working iff this is 0.50)
+
+--- one-sided missing, per a_*/b_* pair (a gap here is a corner named by a NaN) ---
+         lay_a/lay_b        only-A n= 43,364 P=0.5982 | only-B n= 43,500 P=0.4014 | Δ=+0.1968 · debut 100%  (debut)
+      stepup_a/stepup_b     only-A n= 33,707 P=0.5519 | only-B n= 33,760 P=0.4506 | Δ=+0.1013 · debut 95%  (debut)
+  worst unexplained asymmetry: 0.0000  ok
+
+--- missing vs present, per feature (legitimate when missingness is a fact about the fighter, not about the crawl) ---
+  lay_b            missing 17.0%  P(A|missing)=0.5642  P(A|present)=0.4873  Δ=+0.0769
+  lay_a            missing 17.0%  P(A|missing)=0.4369  P(A|present)=0.5133  Δ=-0.0765
+  stepup_a         missing 27.1%  P(A|missing)=0.4833  P(A|present)=0.5067  Δ=-0.0234
+  stepup_b         missing 27.1%  P(A|missing)=0.5153  P(A|present)=0.4948  Δ=+0.0205
+  venue_cos        missing  6.5%  P(A|missing)=0.4909  P(A|present)=0.5010  Δ=-0.0101
+  card_size        missing  6.1%  P(A|missing)=0.4913  P(A|present)=0.5009  Δ=-0.0097
+  d_bouts_true     missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  n_true_a         missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  n_true_b         missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  d_losses_true    missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  a_unbeaten       missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  b_unbeaten       missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  d_hidden         missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+  title_lvl        missing  6.2%  P(A|missing)=0.4916  P(A|present)=0.5009  Δ=-0.0093
+
+--- does a feature say HOW the fight ended? (375,054 bouts with a known method, P(stoppage)=0.5297) ---
+  card_size        missing   n=  5,777  P(stop|yes)=0.8231  P(stop|no)=0.5251  Δ=0.2980
+  title_lvl        missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  ntrue_seen_min   missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  ntrue_seen_max   missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  ntrue_min        missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  ntrue_max        missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  n_true_b         missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  n_true_a         missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  is_title         missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  is_main          missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  hidden_seen_min  missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  hidden_seen_max  missing   n=  6,051  P(stop|yes)=0.8133  P(stop|no)=0.5250  Δ=0.2882
+  worst: 0.2980  ok (era effects only)
+
+--- single features that alone separate the corners too well ---
+  glicko_e         tails separate A's win rate by 0.982 (0.008 → 0.990)
+  d_glicko_z       tails separate A's win rate by 0.984 (0.007 → 0.991)
+  d_elo_fast       tails separate A's win rate by 0.977 (0.011 → 0.988)
+  d_elo_fs         tails separate A's win rate by 0.978 (0.010 → 0.988)

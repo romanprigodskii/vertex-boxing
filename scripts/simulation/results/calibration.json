@@ -1,0 +1,21 @@
+{
+ "label": "final-close",
+ "corpus": {
+  "n": 89087,
+  "calibration_slope": 1.0035617293319044,
+  "oracle_factor": 1.005,
+  "oracle_gain": 1.2768362982473747e-06
+ },
+ "premium": {
+  "n": 12536,
+  "calibration_slope": 1.0086239118073654,
+  "oracle_factor": 1.01,
+  "oracle_gain": 7.906333405582888e-06
+ },
+ "quoted": {
+  "n": 3288,
+  "calibration_slope": 0.9241866380986127,
+  "oracle_factor": 0.925,
+  "oracle_gain": 0.000957737610445375
+ }
+}

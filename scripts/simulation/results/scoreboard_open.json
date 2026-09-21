@@ -1,0 +1,35 @@
+{
+ "label": "final-open",
+ "tag": "l6",
+ "feats": "everyz",
+ "calib": "none",
+ "devig": "power",
+ "devig_slope": 1.039779726668833,
+ "price": "open",
+ "weight": "none",
+ "n_test": 3288,
+ "n_train_quoted": 4973,
+ "ll_model": 0.36798655149669524,
+ "ll_market": 0.3590809980676685,
+ "gap": -0.008905553429026672,
+ "ci": [
+  -0.020648813615383944,
+  0.002631242208892838
+ ],
+ "ll_corpus": 0.3342017304261689,
+ "n_corpus_test": 89087,
+ "ll_prem": 0.2820173200983651,
+ "n_prem": 12536,
+ "halflife": 6.0,
+ "seeds": 3,
+ "n_corpus": 413279,
+ "trees": 2470,
+ "blend_w_model": 0.37,
+ "blend_w_market": 0.63,
+ "ll_blend": 0.34836861146751275,
+ "blend_gap": 0.010712386600155832,
+ "blend_ci": [
+  0.0062656581264989575,
+  0.01504777758695427
+ ]
+}

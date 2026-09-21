@@ -1,0 +1,67 @@
+matched 14 bouts · 44 markets found no corpus bout
+
+дата        бой                                        Poly  модель  A выиграл
+2024-05-18  Will Tyson Fury beat Oleksandr Usyk in R  0.480   0.556        нет
+2024-12-21  Will Usyk beat Fury?                      0.550   0.808         да
+2025-05-02  Teofimo Lopez vs. Arnold Barboza Jr       0.320   0.464        нет
+2025-07-19  Boxing: Usyk vs Dubois 2                  0.230   0.685        нет
+2025-09-13  Boxing: Canelo Álvarez vs. Terence Crawf  0.380   0.455         да
+2025-11-15  Chris Eubank Jr. vs Conor Benn Nov 15, 2  0.520   0.563        нет
+2025-11-22  Brian Norman Jr. vs Devin Haney Nov 22,   0.460   0.567         да
+2025-12-19  Who will win Jake Paul vs Anthony Joshua  0.850   0.670         да
+2026-01-31  Boxing: Lopez vs. Stevenson               0.621   0.514         да
+2026-02-21   The Ring - High Stakes: Ryan Garcia vs.  0.340   0.326        нет
+2026-04-11  Boxing: Tyson Fury vs. Arslanbek Makhmud  0.150   0.081        нет
+2026-04-11  Boxing: Conor Benn vs. Regis Prograis     0.890   0.930         да
+2026-05-02  The Day: Naoya Inoue vs. Junto Nakatani   0.819   0.763         да
+2026-05-23  Glory in Giza: Oleksandr Usyk vs. Rico V  0.080   0.047        нет
+
+                        log-loss    Brier
+Polymarket (без маржи)    0.4281   0.1350
+наша модель               0.4944   0.1680
+  модель − Polymarket: +0.0663 [95% -0.0727, +0.2302]  (неотличимо — что при таком n и ожидается)
+
+--- на 12 боях, где есть ОБЕ цены ---
+  Polymarket               log-loss 0.3643
+  букмекер (power de-vig)  log-loss 0.3274
+  наша модель              log-loss 0.4436
+  |Polymarket − де-вигнутый букмекер|: медиана 0.047, среднее 0.047
+  ^ маленькое расхождение означает, что де-виг работает
+
+--- НАСТОЯЩЕЕ открытие против того, что записал фид (12 боёв) ---
+дата         первые сделки  open фида  close фида  A выиграл
+2024-12-21           0.600      0.624       0.563         да
+2025-05-02           0.320      0.274       0.303        нет
+2025-07-19           0.240      0.112       0.215        нет
+2025-11-15           0.520      0.677       0.608        нет
+2025-11-22           0.460      0.565       0.514         да
+2025-12-19           0.870      0.974       0.923         да
+2026-01-31           0.658      0.754       0.765         да
+2026-02-21           0.340      0.388       0.296        нет
+2026-04-11           0.220      0.152       0.153        нет
+2026-04-11           0.890      0.910       0.951         да
+2026-05-02           0.800      0.764       0.818         да
+2026-05-23           0.070      0.039       0.030        нет
+  Polymarket, первые сделки  log-loss 0.3596
+  Polymarket, перед гонгом   log-loss 0.3643
+  open фида                  log-loss 0.3318
+  close фида                 log-loss 0.3274
+
+  |первые сделки − open фида| : медиана 0.058
+  |первые сделки − close фида|: медиана 0.049
+  ^ если первое ЗАМЕТНО меньше второго, фид пишет уже устоявшуюся цену,
+    и настоящий опенер мягче того, по чему мы считаем эдж
+
+не сматчились (44):
+  2024-05-30  Will Nic Carter defeat David Hoffman?
+  2024-05-30  Will David Hoffman defeat Nic Carter?
+  2024-08-09  66kg W Boxing Final: Khelif (ALG) vs. Yang (CHN)
+  2024-09-18  Blonde Broker vs Ashley
+  2024-12-05  Ansem vs. Bitboy - Crypto Fight Night
+  2024-10-11  Hoffman vs. Warwick
+  2025-01-31  RASMR vs. Threadguy
+  2025-01-31  Iggy Azalea vs. Profits
+  2025-01-31  OG Shoots vs. Easy
+  2025-01-31  Mungo vs. MINH
+  2024-10-19  Ngannou vs. Ferreira
+  2024-11-08  Taylor vs. Serrano

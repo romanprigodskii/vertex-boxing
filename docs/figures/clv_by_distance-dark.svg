@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="720" height="420" role="img" aria-labelledby="t d" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">Closing-line value rises with the level of the fight</title>
+<desc id="d">Mean closing-line value per bet, with 95% bootstrap intervals: 4–6 rounds, 283 bets, +0.0044 [+0.0017, +0.0073]; 8 rounds, 337 bets, +0.0075 [+0.0033, +0.0119]; 10 rounds, 781 bets, +0.0093 [+0.0060, +0.0127]; 12 rounds, 468 bets, +0.0180 [+0.0130, +0.0232].</desc>
+<rect width="720" height="420" rx="12" fill="#1a1a19"/>
+<text x="28" y="42" font-size="17" font-weight="600" fill="#ffffff">Closing-line value rises with the level of the fight</text>
+<text x="28" y="66" font-size="12.5" fill="#c3c2b7">Mean movement of the price towards the bet between open and close, in probability · 95% bootstrap intervals</text>
+<line x1="92" x2="690" y1="330.0" y2="330.0" stroke="#5a5955" stroke-width="1"/>
+<text x="80" y="334.0" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.000</text>
+<line x1="92" x2="690" y1="284.8" y2="284.8" stroke="#2e2e2c" stroke-width="1"/>
+<text x="80" y="288.8" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.005</text>
+<line x1="92" x2="690" y1="239.6" y2="239.6" stroke="#2e2e2c" stroke-width="1"/>
+<text x="80" y="243.6" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.010</text>
+<line x1="92" x2="690" y1="194.4" y2="194.4" stroke="#2e2e2c" stroke-width="1"/>
+<text x="80" y="198.4" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.015</text>
+<line x1="92" x2="690" y1="149.2" y2="149.2" stroke="#2e2e2c" stroke-width="1"/>
+<text x="80" y="153.2" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.020</text>
+<line x1="92" x2="690" y1="104.0" y2="104.0" stroke="#2e2e2c" stroke-width="1"/>
+<text x="80" y="108.0" font-size="11.5" text-anchor="end" fill="#c3c2b7" font-variant-numeric="tabular-nums">0.025</text>
+<line x1="166.8" x2="166.8" y1="314.5" y2="263.9" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="159.8" x2="173.8" y1="314.5" y2="314.5" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="159.8" x2="173.8" y1="263.9" y2="263.9" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<circle cx="166.8" cy="289.9" r="6" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="180.8" y="293.9" font-size="12.5" font-weight="600" fill="#ffffff" font-variant-numeric="tabular-nums">+0.0044</text>
+<text x="166.8" y="356" font-size="12.5" font-weight="600" text-anchor="middle" fill="#ffffff">4–6 rounds</text>
+<text x="166.8" y="374" font-size="11.5" text-anchor="middle" fill="#c3c2b7">club · 283 bets</text>
+<line x1="316.2" x2="316.2" y1="299.7" y2="222.1" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="309.2" x2="323.2" y1="299.7" y2="299.7" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="309.2" x2="323.2" y1="222.1" y2="222.1" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<circle cx="316.2" cy="262.2" r="6" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="330.2" y="266.2" font-size="12.5" font-weight="600" fill="#ffffff" font-variant-numeric="tabular-nums">+0.0075</text>
+<text x="316.2" y="356" font-size="12.5" font-weight="600" text-anchor="middle" fill="#ffffff">8 rounds</text>
+<text x="316.2" y="374" font-size="11.5" text-anchor="middle" fill="#c3c2b7">regional · 337 bets</text>
+<line x1="465.8" x2="465.8" y1="276.0" y2="215.5" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="458.8" x2="472.8" y1="276.0" y2="276.0" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="458.8" x2="472.8" y1="215.5" y2="215.5" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<circle cx="465.8" cy="246.3" r="6" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="479.8" y="250.3" font-size="12.5" font-weight="600" fill="#ffffff" font-variant-numeric="tabular-nums">+0.0093</text>
+<text x="465.8" y="356" font-size="12.5" font-weight="600" text-anchor="middle" fill="#ffffff">10 rounds</text>
+<text x="465.8" y="374" font-size="11.5" text-anchor="middle" fill="#c3c2b7">national · 781 bets</text>
+<line x1="615.2" x2="615.2" y1="212.7" y2="120.3" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="608.2" x2="622.2" y1="212.7" y2="212.7" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<line x1="608.2" x2="622.2" y1="120.3" y2="120.3" stroke="#3987e5" stroke-width="2" stroke-linecap="round"/>
+<circle cx="615.2" cy="166.9" r="6" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="629.2" y="170.9" font-size="12.5" font-weight="600" fill="#ffffff" font-variant-numeric="tabular-nums">+0.0180</text>
+<text x="615.2" y="356" font-size="12.5" font-weight="600" text-anchor="middle" fill="#ffffff">12 rounds</text>
+<text x="615.2" y="374" font-size="11.5" text-anchor="middle" fill="#c3c2b7">title · 468 bets</text>
+<text x="28" y="398" font-size="11" fill="#8f8e87">Priced test bouts, Jun 2023 – Jul 2026. A bet is struck at the open when the model's probability beats the price by 2 points.</text>
+</svg>

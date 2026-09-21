@@ -1,0 +1,5 @@
+413,279 bouts · 260 columns · feature version 15
+
+  by class: anti 103 · inv 135 · prob 2 · swap 20
+
+  every column mirrors  ✓

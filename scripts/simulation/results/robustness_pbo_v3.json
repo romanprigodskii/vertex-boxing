@@ -1,0 +1,35 @@
+{
+ "label": "final-close-pbo3",
+ "tag": "l6",
+ "feats": "everyz",
+ "calib": "none",
+ "devig": "power",
+ "devig_slope": 1.008804861128553,
+ "price": "close",
+ "weight": "none",
+ "n_test": 3644,
+ "n_train_quoted": 5489,
+ "ll_model": 0.352009929810355,
+ "ll_market": 0.33136185648166944,
+ "gap": -0.02064807332868565,
+ "ci": [
+  -0.03154364753835778,
+  -0.010094323022589939
+ ],
+ "ll_corpus": 0.3349910471979639,
+ "n_corpus_test": 92783,
+ "ll_prem": 0.2834085598782172,
+ "n_prem": 13047,
+ "halflife": 6.0,
+ "seeds": 3,
+ "n_corpus": 413279,
+ "trees": 2386,
+ "blend_w_model": 0.14,
+ "blend_w_market": 0.86,
+ "ll_blend": 0.3276535794824354,
+ "blend_gap": 0.0037082769992340535,
+ "blend_ci": [
+  0.0022436228165981613,
+  0.005151479265507015
+ ]
+}
