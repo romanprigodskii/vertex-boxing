@@ -8,7 +8,7 @@ two men, how big is the card. If the market's edge is concentrated where our
 data is thin, then more data is the answer; if it is flat, the missing thing is
 private information and no amount of crawling will find it.
 
-  ./venv/bin/python scripts/where.py repro-base
+  python3 scripts/where.py final-close --tag l6
 """
 
 from __future__ import annotations
@@ -31,12 +31,14 @@ def ll(p, y):
 
 
 def main() -> None:
-    lab = sys.argv[1] if len(sys.argv) > 1 else "repro-base"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    lab = args[0] if args else "final-close"
+    tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "l6"
+    args = [a for a in args if a != tag]
     d = np.load(CACHE / "preds" / f"{lab}.npz", allow_pickle=True)
     p, y, pm, key = d["p"], d["y"], d["p_mkt"], d["key"]
     want = ["rd_max", "n_min", "ntrue_min", "sched_rounds", "card_size", "d_bt8"]
-    ver = int(sys.argv[2]) if len(sys.argv) > 2 else F.FEATS_VERSION
-    feats = pd.read_parquet(CACHE / f"feats_card_v{ver}.parquet", columns=want)
+    feats = pd.read_parquet(CACHE / F.cache_name("feats", tag), columns=want)
     f = feats.iloc[key].reset_index(drop=True)
     lm, lk = ll(p, y), ll(pm, y)
     print(f"{lab}: {len(y):,} quoted test bouts · model {lm.mean():.4f} · "

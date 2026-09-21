@@ -18,12 +18,21 @@ continental/world belt, both copied from regional.py without adjustment. If the
 high-level slice does not beat the low-level slice on a window the rule never
 saw, the rule is an artefact of looking at a table.
 
-  ./venv/bin/python scripts/rule_oos.py                 # cutoff 2021-06-10
-  ./venv/bin/python scripts/rule_oos.py --cutoff 2020-06-10 --seeds 5
+THE 2026-08-02 RUN THAT FIRST REPORTED THIS WAS ON THE LEAKY MODEL — tag `card`,
+the `everyx` of that day (judges' fields still in it), test-time averaging only.
+Its ×1.8 and +4.2% are therefore not numbers about the model that ships. The
+defaults are now the deployment configuration market_eval's headline runs: tag
+`l6`, `everyz`, both orientations in training and at prediction, extremely
+randomised trees. `--plain` drops the mirror and extra_trees, which is the
+closest this script can come to the old configuration on the new features.
+
+  python3 scripts/rule_oos.py --json results/rule_oos.json   # cutoff 2021-06-10
+  python3 scripts/rule_oos.py --cutoff 2020-06-10 --seeds 5
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -97,13 +106,21 @@ def clv_roi(p, y, oa, ob, ca, cb, cap=np.inf, devig="power"):
 def main() -> None:
     cut = pd.Timestamp(ME.arg("--cutoff", "2021-06-10"))
     seeds = int(ME.arg("--seeds", "3"))
-    B = lab.Bench("card")
+    tag = ME.arg("--tag", "l6")
+    fset = ME.arg("--feats", "everyz")
+    B = lab.Bench(tag)
     print(f"\nOUT-OF-SAMPLE ТЕСТ ПРАВИЛА · обучение до {cut.date()}, "
           f"проверка на {cut.date()} → {B.cutoff.date()}", flush=True)
     print("Правило и порог скопированы из regional.py без изменений.\n", flush=True)
 
-    cols = ME.resolve("everyx")
-    pr = lab.fit(B, cols, cut, seeds=seeds, tta=True)
+    cols = ME.resolve(fset)
+    stack = ({} if "--plain" in sys.argv
+             else {"mirror_train": True, "params_over": {"extra_trees": True}})
+    pr = lab.fit(B, cols, cut, seeds=seeds, tta=True, **stack)
+    res: dict = {"cutoff_train": str(cut.date()), "window_end": str(B.cutoff.date()),
+                 "tag": tag, "feats": fset, "seeds": seeds,
+                 "config": "tta" if "--plain" in sys.argv else "tta+mirror+extra_trees",
+                 "edge_threshold": EDGE, "slices": {}, "price_cap": {}}
 
     # quoted bouts strictly between the two cutoffs: unseen by this model, and
     # from an era the rule was never looked at
@@ -117,9 +134,14 @@ def main() -> None:
     y = B.jy[win]
     ca, cb = B.ca[win], B.cb[win]
     oa, ob = B.oa[win], B.ob[win]
+    # keep what took the training to produce, so any further cut of this window
+    # is a read of a file and not another quarter of an hour of boosting
+    pdir = ROOT / "imports" / "staging" / "preds"
+    pdir.mkdir(exist_ok=True)
+    np.savez(pdir / f"rule-oos-{cut.date()}.npz", p=p, y=y, rows=rows, p_mkt=B.p_mkt[win],
+             ca=ca, cb=cb, oa=oa, ob=ob)
 
-    f = pd.read_parquet(ROOT / "imports" / "staging" /
-                        f"feats_card_v{F.FEATS_VERSION}.parquet",
+    f = pd.read_parquet(ROOT / "imports" / "staging" / F.cache_name("feats", tag),
                         columns=["sched_rounds", "title_lvl"]).iloc[rows].reset_index(drop=True)
     sch = np.nan_to_num(f["sched_rounds"].to_numpy(float), nan=0)
     tl = np.nan_to_num(f["title_lvl"].to_numpy(float), nan=0)
@@ -130,6 +152,9 @@ def main() -> None:
           f"нижних {low.sum():,}")
     print(f"модель {ll(p, y).mean():.4f} · рынок "
           f"{ll(B.p_mkt[win], y).mean():.4f}\n")
+    res |= {"n_quoted_window": int(win.sum()), "n_top": int(top.sum()),
+            "n_low": int(low.sum()), "ll_model": float(ll(p, y).mean()),
+            "ll_market": float(ll(B.p_mkt[win], y).mean()), "devig": B.dv}
     hdr = (f"{'срез':34s} {'ставок':>7s} {'CLV':>9s} {'95%':>20s} "
            f"{'ROI':>8s} {'95%':>18s} {'ROI по закр.':>13s}")
     print(hdr); print("-" * len(hdr))
@@ -138,15 +163,28 @@ def main() -> None:
         r = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m], cap=cap)
         n, c, (lo, hi), roi, (rlo, rhi), imp, (ilo, ihi) = r
         if not n:
-            return
+            return None
+        # the same bets priced at the close under the other reading of the
+        # margin: clv_money.py found that which price band pays depends on it
+        *_, imp_p, (plo, phi) = clv_roi(p[m], y[m], oa[m], ob[m], ca[m], cb[m], cap=cap,
+                                        devig="proportional")
         print(f"{name:34s} {n:7d} {c:+9.4f} [{lo:+.4f},{hi:+.4f}] "
               f"{roi:+7.1%} [{rlo:+.1%},{rhi:+.1%}] "
-              f"{imp:+7.1%} [{ilo:+.1%},{ihi:+.1%}]")
+              f"{imp:+7.1%} [{ilo:+.1%},{ihi:+.1%}]  prop {imp_p:+.1%} [{plo:+.1%},{phi:+.1%}]")
+        return {"bouts": int(m.sum()), "bets": n, "clv": c, "clv_ci": [lo, hi],
+                "roi": roi, "roi_ci": [rlo, rhi],
+                "roi_at_close": imp, "roi_at_close_ci": [ilo, ihi],
+                "roi_at_close_proportional": imp_p,
+                "roi_at_close_proportional_ci": [plo, phi]}
 
-    for name, m in (("ВСЕ котируемые", np.ones(len(y), bool)),
-                    ("низкий уровень (<=8р, без пояса)", low),
-                    ("ВЕРХНИЙ (12р или конт./мир. пояс)", top)):
-        line(name, m)
+    for key, name, m in (("all", "ВСЕ котируемые", np.ones(len(y), bool)),
+                         ("low", "низкий уровень (<=8р, без пояса)", low),
+                         ("top", "ВЕРХНИЙ (12р или конт./мир. пояс)", top)):
+        res["slices"][key] = line(name, m)
+    t, lo_ = res["slices"]["top"], res["slices"]["low"]
+    if t and lo_ and lo_["clv"]:
+        res["clv_ratio_top_over_low"] = t["clv"] / lo_["clv"]
+        print(f"\nверх / низ по CLV: ×{res['clv_ratio_top_over_low']:.2f}")
 
     # The second rule, and the reason this script now carries a price cap.
     # clv_money.py found the upper tier's closing-line value is entirely a
@@ -159,13 +197,18 @@ def main() -> None:
     print(" проверяется здесь на окне, которого оно не видело)")
     print(hdr); print("-" * len(hdr))
     for cap in (2.0, 3.0, 5.0):
-        line(f"ВЕРХНИЙ, цена < {cap:.0f}", top, cap=cap)
+        res["price_cap"][f"top_below_{cap:.0f}"] = line(f"ВЕРХНИЙ, цена < {cap:.0f}",
+                                                       top, cap=cap)
 
     print("\nЧитать так: правило по уровню подтверждается, только если ВЕРХНИЙ "
           "срез даёт CLV\nзаметно выше нижнего. Правило по цене — только если "
           "полоса фаворитов держит\nCLV и здесь. А колонка «ROI по закрытию» "
           "говорит, чего ждать от денег: она узкая\nи в ней нет исходов боёв, "
           "так что расхождение с фактическим ROI — это удача, не эдж.")
+    if "--json" in sys.argv:
+        dst = Path(ME.arg("--json", ""))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(json.dumps(res, indent=1, default=float) + "\n")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ they CAN do is answer a qualitative question that nothing else here answers, and
 incidentally audit the de-vig: if the de-vigged bookmaker close and the
 zero-margin price agree on these fights, the de-vig is doing its job.
 
-  ./venv/bin/python scripts/polymarket_eval.py v10-mirror
+  python3 scripts/polymarket_eval.py final-close --tag l6
 """
 
 from __future__ import annotations
@@ -44,9 +44,12 @@ def boot(d, n=4000, seed=42):
 
 
 def main() -> None:
-    label = sys.argv[1] if len(sys.argv) > 1 else "v10-mirror"
+    tag = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else "l6"
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and a != tag]
+    label = args[0] if args else "final-close"
     pm = pd.read_parquet(CACHE / "polymarket_boxing.parquet")
-    df = pd.read_parquet(CACHE / "sym_card.parquet",
+    # the rows the predictions were keyed on: key_corp indexes this frame
+    df = pd.read_parquet(CACHE / f"sym_{tag}.parquet",
                          columns=["dt", "a", "b", "a_name", "b_name",
                                   "winner_id", "is_draw"])
     df["dt"] = pd.to_datetime(df["dt"])
@@ -63,6 +66,10 @@ def main() -> None:
         if not na or not nb:
             continue
         end = pd.to_datetime(g["end_date"].iloc[0], utc=True)
+        if end is None or pd.isna(end):
+            # a market with no end date cannot be placed against a bout date
+            misses.append(("no end date", q[:52]))
+            continue
         # candidate bouts within three days, either corner order
         w = df[(df["dt"] >= end.tz_localize(None) - pd.Timedelta(days=3))
                & (df["dt"] <= end.tz_localize(None) + pd.Timedelta(days=3))]
