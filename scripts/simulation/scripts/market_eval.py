@@ -111,7 +111,11 @@ GROUPS = {"base": F.BASE, "record": F.RECORD, "sos2": F.SOS2, "glicko": F.GLICKO
           "shr": F.SHR, "grf": F.GRF, "divr": F.DIVR, "elo3": F.ELO3,
           # whole-history rating, the one item on the original port
           # plan's list that had never been built
-          "whr": F.WHR}
+          "whr": F.WHR,
+          # the running order of the card, which is settled in fight week. With
+          # weigh, ref and judc it is what a bettor at the OPENING price, weeks
+          # earlier, could not have known: `--drop weigh+ref+judc+cardpos`
+          "cardpos": ["card_pos", "is_main"]}
 
 SETS = {
     "base": F.BASE,
@@ -444,7 +448,13 @@ def main() -> None:  # noqa: PLR0915
     y = (j["winner_id"].astype(str) == j["a"].astype(str)).astype(int).values
     idx = j["index"].values
 
-    cutoff = pd.Series(j["dt"]).quantile(0.6)
+    # The cutoff is the 0.6 quantile of the PRICED dates, so a different price
+    # feed moves it and with it the whole model. `--cutoff` pins it: a second
+    # feed read against the published cutoff (2023-06-10) is scored by the very
+    # same model, and on the bouts both feeds price the only thing that differs
+    # is the price.
+    cutoff = (pd.Timestamp(arg("--cutoff", "")) if "--cutoff" in sys.argv
+              else pd.Series(j["dt"]).quantile(0.6))
     tr, te = (j["dt"] <= cutoff).values, (j["dt"] > cutoff).values
     print(f"  cutoff {cutoff.date()} · quoted train {tr.sum():,} · test {te.sum():,}")
 
@@ -833,6 +843,7 @@ def main() -> None:  # noqa: PLR0915
     out = {"label": label, "tag": tag, "feats": fset, "calib": calib,
            "devig": dv, "devig_slope": slopes[dv], "price": which,
            "weight": weight, "n_test": int(te.sum()), "n_train_quoted": int(tr.sum()),
+           "cutoff": str(cutoff.date()), "odds_feed": ODDS.name,
            "ll_model": float(ll_mod), "ll_market": float(ll_mkt),
            "gap": float(d.mean()), "ci": [float(lo), float(hi)],
            "ll_corpus": float(ll_corp), "n_corpus_test": int(len(pidx)),

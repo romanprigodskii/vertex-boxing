@@ -1,0 +1,4 @@
+# SHA-256 of the files pre-registration 2 fixes. Timestamped: evalue_protocol_2.manifest.ots
+d9146a4600b90e9b7ee64cded49f3a2517e2fe883c8afb22f6b8d6eff9ea8faf  docs/evalue_protocol_2.md
+28b846e4e3800478dbb2414a11300fe6b92d8a9719d1615ce937782d50359d28  scripts/simulation/scripts/ev_window.py
+0309e4797fe411a6a4ee96d33accdf87680304550d218844a5f23dc3d041f626  scripts/simulation/scripts/market_eval.py
