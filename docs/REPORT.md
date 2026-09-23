@@ -23,14 +23,25 @@ available odds cover, and the claim points the wrong way.
   +0.0180 on twelve-rounders, and three independent markers of level agree. On
   a window the rule was never chosen on, the top of the market gave 2.0 times
   the closing-line value of the bottom.
-- **It does not make money.** On the tier where the value is largest, the margin
-  paid at the open is larger than the movement the model catches, under either
-  way of taking the margin out. Priced at the close, the strategy returns −6.1%
-  under the de-vig that calibrates the closing price, and −0.6% under the other.
-  No real bet was placed; everything here is a backtest.
+- **At the closing price it makes no money. At the opening price it did, in two
+  of three windows, one of them pre-registered in public.** Bets struck at
+  Bet365's closing price are worth nothing (section 9). Bets struck at the
+  opening price, with the model blended into that price, returned:
+  - at Bet365 over 2023–2025: +10.9% [+6.2%, +15.9%];
+  - at ProBoxingOdds over 2016–2020: +18% to +24%, in a test whose protocol was
+    timestamped in the Bitcoin blockchain and pushed to this repository before
+    any of it ran (e = 7.0 × 10⁶ against a bar of 20);
+  - at Bet365 over 2021–2023: nothing that clears the bar (e = 12.5).
+
+  The model does not out-forecast the opening price on its own. It forecasts
+  where the price is going. No real bet was placed, everything is a backtest,
+  and a bookmaker limits an account that wins at the open.
 - **A pre-registered random search over 200 configurations found nothing** that
   holds on bouts it had not seen. The final configuration was already the top
   of that space (section 8).
+- **None of sixteen classic price biases shows up at Bet365's close:**
+  favourite–longshot, the fighter on a long win streak, the unbeaten record,
+  the home fighter, and others (section 9).
 - **The project caught a post-bell leak in its own data.** Put back, it is worth
   +0.0038 [+0.0031, +0.0044] on held-out bouts and nothing on priced ones. It
   was removed, and the bench was made to reproduce itself: re-run seven weeks
@@ -51,7 +62,11 @@ every number in this report is measured on it.
 ProBoxingOdds, 2016 onwards, with the best price across its ten books. The
 closing price used for scoring is the *worst* on the board, the conservative
 reading for the model. Polymarket trades, recovered from its on-chain history,
-supply a price with no margin in it for a separate check (section 5).
+supply a price with no margin in it for a separate check (section 5). Bet365's
+lines, from BetsAPI's archive, cover 8,169 bouts from late 2020, with timestamps.
+The close is the last price before the bout went in-play: the archive's "last
+price" is often an in-play one, and using it would have repeated the leak of
+section 6 on the market's side.
 
 **What is not here.** Neither the corpus nor the prices are in this repository.
 BoxRec's terms forbid redistribution of data derived from it and the prices are
@@ -248,6 +263,15 @@ price cannot tell them apart. So the calibrated reading says the strategy loses
 money, the other says it roughly breaks even, and neither says the edge is
 large. Only prices taken live, before the bell, can settle it.
 
+**What happened when outcomes were allowed to decide.** Section 9 drops the
+assumption that the closing price is the truth and scores bets against what
+actually happened, with a test that pays for how many questions it asks. The
+reading above holds for the close: there is no money there. It does not hold
+for the open. The rule above backs the raw model wherever it disagrees with the
+price by two points. A rule that backs the model blended into the opening price,
+and only where that blend beats the posted decimal, made money in two windows
+out of three.
+
 **A correction made for this report.** Until September the script behind this
 table took the margin out of the open proportionally and out of the close by
 the power method. The two methods disagree about favourites and longshots
@@ -277,6 +301,12 @@ so no price-ceiling rule is claimed.
   price, the favourite sits on the wrong corner on 37% of the changed bouts.
   On the bouts only OddsPortal prices, the "market" scores 1.02 nats, worse than a
   coin flip. The merge is not used for any number here.
+- **Not one bookmaker.** Against Bet365's close, on 3,078 bouts from 2023-06
+  to 2025-12, the same model blended into the price beats the price by a wide
+  margin: e = 2.5 × 10⁸, pre-registered (section 9). A control that only
+  recalibrates the price, with no model in it, scores 0.11. On the 452 bouts of
+  2026 that both feeds price, the two closes agree on the favourite 98.5% of
+  the time.
 - **Not calibration.** The model's calibration slope is 1.004 on the corpus
   holdout, 1.009 on the premium holdout and 0.924 on priced bouts, and the best
   single factor on its logits, chosen on the test set itself, recovers 0.0010 of
@@ -391,7 +421,107 @@ selection. The final configuration was already at the top of this space. More
 candidates would have produced a larger lead on the selection window and the
 same answer on the confirmation, which is why a larger search was not run.
 
-## 9. What is open
+## 9. The opening price, tested by betting
+
+Sections 4.2 and 4.3 measure value with the closing price as the yardstick.
+This section scores the same model against what happened. It uses e-values: a
+bet against the price that cannot grow wealth in expectation if the price is
+right. So the wealth it ends with measures the evidence, and a mixture over
+every stake it could have chosen charges for the choice. Two audits were run,
+each written down before it was scored.
+
+### 9.1 The audit against Bet365
+
+The protocol is [`evalue_protocol.md`](evalue_protocol.md), the machine-readable
+registry is `ev_registry.py`, and the results are in `evalue_audit.json`. It was
+committed before the audit ran, but only locally, so the order of events rests
+on our word. The confirmatory window is 2023-06-11 to 2025-12-31, 3,078 bouts.
+The first seven months of 2026 had been looked at, so they were left out.
+
+| hypothesis | bouts | e-value | bar | result |
+|---|---|---|---|---|
+| P1: the blend beats Bet365's close | 3,078 | 2.5 × 10⁸ | 80 | rejected |
+| P2: the same, on bouts no other feed prices | 409 | 4.4 | 80 | not rejected |
+| P3: money at Bet365's open, real prices | 3,077 | 3.9 × 10⁸ | 80 | rejected |
+| P4: money at Bet365's close, real prices | 3,078 | 1,230 | 80 | rejected, then found to be an artifact |
+| C1: control, the price recalibrated with no model | 3,078 | 0.11 | — | — |
+
+Sixty-one slices and price biases were tested under e-BH, which holds under the
+arbitrary dependence that overlapping slices have. Thirty reached e ≥ 20,
+against 0.23 expected under a simulated null (95th percentile 1). That is P1
+showing through the large slices, not thirty findings. **None of the sixteen
+price biases reached 20.** Favourite–longshot scored 0.07, a fighter on a 10+
+win streak being overpriced 0.29, the home fighter 2.0.
+
+Both money results looked too good, so each got the checks that could kill it
+(`ev_followup.py`, `evalue_followup.json`).
+
+- **P4 is stale prices.** On the 1,539 bouts whose close is Bet365's price at
+  the moment of going in-play, e = 1.15. The rejection comes from bouts where
+  Bet365 ran no in-play market, whose last price can be days old.
+- **P3 survives every check.**
+  - Retrained without anything settled in fight week (weigh-in, referee, the
+    card's judges, running order), it scores e = 1.2 × 10⁸.
+  - On simulated outcomes it averages 0.20 and never reaches 80.
+  - No opening book sums to under 100%.
+  - Each year clears 80 on its own: 2023 2,780, 2024 93, 2025 171.
+  - Price-only controls score 1.2 and 0.25, and backing every favourite
+    returns −0.5%.
+  - The line moved towards the model's side on 69% of its bets by the close.
+  - At ProBoxingOdds' open, on the same window, e = 7.0 × 10⁶ and flat stakes
+    return +12.2% [+6.8%, +18.2%].
+
+  Bet365's line opens a median three days before the bell.
+
+What the model does to each price, on the same 3,077 bouts (log-loss, lower is
+better):
+
+| forecast | log-loss |
+|---|---|
+| the model alone | 0.3590 |
+| Bet365's open | 0.3506 |
+| the open, blended with the model (λ 0.35) | 0.3396 |
+| Bet365's close | 0.3379 |
+| the close, blended with the model (λ 0.15) | 0.3336 |
+
+On its own the model is worse than the opening price. Blended in, it moves the
+open 87% of the way to the close, three days early.
+
+### 9.2 A replication pre-registered in public
+
+The window above had been seen through another bookmaker's prices, so the
+result was re-asked on bouts that no analysis here had scored against an
+opening price. The protocol is [`evalue_protocol_2.md`](evalue_protocol_2.md).
+Its SHA-256 manifest was stamped with OpenTimestamps and pushed to this
+repository before either model was trained. The proof, `evalue_protocol_2.manifest.ots`,
+anchors it in Bitcoin blocks 968272 and 968274.
+
+| window | prices | model trained to | bouts | e-value, real prices | flat stakes, λ 0.10–0.50 |
+|---|---|---|---|---|---|
+| **A (primary)** 2016-06 → 2020-06 | ProBoxingOdds' open | 2016-06-10 | 2,016 | **7.0 × 10⁶**, rejected at 20 | +18% to +24%, every interval above zero |
+| B (secondary, seen) 2021-06 → 2023-06 | Bet365's open | 2021-06-10 | 1,545 | 12.5, not past 20 | +19% to −1% |
+
+Both passed their null simulations before the real run (mean e 0.26 and 0.31,
+none of 1,000 at 20). Window A's evidence is uneven. 2019 carries most of it
+(e = 1,531) and 2017 some (39), while 2016, 2018 and 2020 are weak on their own.
+Window B falls short, and there the model alone is 0.025 nats worse than
+Bet365's open.
+
+### 9.3 What this does and does not show
+
+It shows that a model which reads records and ratings forecasts where the
+boxing line will move. Blended into the opening price, that forecast made money
+at the opening price in two windows out of three, one of them fixed in public
+before it ran. It does not show that the model beats the market: it loses to
+both prices on its own and makes nothing at the close.
+
+Nor does it show that the money can be taken now. ProBoxingOdds' opening line
+has no timestamp and no named book, and the 2016–2020 market was thinner. An
+account that keeps winning at the open is limited. The edge was absent in
+2021–2023. The one test that none of this can contaminate is the one section 10
+names.
+
+## 10. What is open
 
 - **The unpriced tail cannot be tested.** A club four-rounder that gets a line at
   all is usually a televised prospect's showcase. The anonymous regional card
@@ -400,8 +530,9 @@ same answer on the confirmation, which is why a larger search was not run.
 - **Coverage.** Only 25–37% of title-level bouts carry a price in any year, so
   the betting-side intervals are wide by necessity.
 - **No forward test.** Every number here is historical. The one test that would
-  settle the money question is to publish predictions before the bell and grade
-  them against prices that were live at the time.
+  settle the money question is to publish predictions and opening prices before
+  the bell, timestamped as section 9.2 was, and grade them against what
+  happened.
 
 ## Reproducing
 
@@ -410,6 +541,10 @@ cd scripts/simulation
 ./reproduce.sh            # every result file, about 2.5 hours on an 8-core M3
 ./reproduce.sh level_cut  # or one step
 ```
+
+The e-value audits of section 9 are steps too (`evalue_null`, `evalue_audit`,
+`evalue_followup`, `window_a`, `window_b`), and so are the three models they
+need. `ev_window.py` reads outcomes only when given `--real`.
 
 Each file in `results/` is written by one script, and
 [`results/NUMBERS.md`](../scripts/simulation/results/NUMBERS.md) maps every

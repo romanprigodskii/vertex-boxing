@@ -1,0 +1,16 @@
+{
+ "label": "win-b-model",
+ "odds": "odds_external/betsapi.parquet",
+ "from": "2021-06-10",
+ "to": "2023-06-10",
+ "n_all": 1979,
+ "n_primary": 1545,
+ "threshold": 20.0,
+ "null": {
+  "reps": 1000,
+  "mean_e": 0.310199339136586,
+  "se": 0.0049508476910736145,
+  "share_ge_threshold": 0.0,
+  "max": 2.1831316806708254
+ }
+}

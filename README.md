@@ -20,6 +20,8 @@ measured.
 | closing-line value, 4–6 rounders → 12-rounders | +0.0044 → **+0.0180** |
 | the level rule on a window it was never chosen on | upper tier ×2.0 the CLV of the lower: +0.0276 vs +0.0136 |
 | return at the closing price, upper tier | −0.6% (proportional) to **−6.1%** (power de-vig) |
+| money at Bet365's close, bets settled on real outcomes | none (e = 1.15) |
+| money at the **opening** price, the model blended into it | **+18% to +24%** on 2016–2020, pre-registered in public; +10.9% on 2023–2025; not past the bar on 2021–2023 |
 | a pre-registered random search, 200 configurations | nothing survives on unseen bouts |
 | a post-bell leak caught in the project's own data | P(stoppage) 0.097 vs 0.743 |
 | real bets placed | 0 |
@@ -27,8 +29,14 @@ measured.
 On its own the model loses to the close. Blended into the price, it improves the
 price, so it knows something the price does not. And it knows it at the **top**
 of the sport, not the bottom: closing-line value rises with the scheduled
-distance, and three independent markers of level agree. The margin paid at the
-open is larger than the movement the model catches, so none of this is money.
+distance, and three independent markers of level agree.
+
+What it knows is where the line is going. At the close it makes no money. At
+the opening price, blended into that price, it made money in two windows of
+three. One of those two was a test whose protocol was timestamped in the Bitcoin
+blockchain and pushed here before it ran ([`evalue_protocol_2.md`](docs/evalue_protocol_2.md)).
+All of it is a backtest. No bet was placed, and an account that wins at the
+open gets limited.
 
 **Read [`docs/REPORT.md`](docs/REPORT.md)**: the question, the data, the model,
 the protocol, every result with its interval, the leak, and the dead ends.
@@ -40,6 +48,8 @@ docs/REPORT.md               the final report — start here
 docs/model.md                the lab notebook, in English (every pass, every dead end)
 docs/status.md               the lab notebook, in Russian (the 2026-08-04 state in detail)
 docs/odds.md                 where historical boxing prices exist, and where they do not
+docs/evalue_protocol.md      pre-registration 1: the e-value audit against Bet365
+docs/evalue_protocol_2.md    pre-registration 2, timestamped: the opening price on 2016–2020
 scripts/simulation/
   src/features.py            the point-in-time replay: 231 features, both orientations
   scripts/market_eval.py     the scoreboard: model vs the closing line, and the blend
@@ -49,6 +59,10 @@ scripts/simulation/
   scripts/clv_money.py       closing-line value into money, margin included
   scripts/leak_check.py      does any feature say how the fight ended?
   scripts/mirror_check.py    does every feature mirror when the corners swap?
+  scripts/ev_registry.py     the 61 hypotheses of pre-registration 1, fixed before it ran
+  scripts/ev_audit.py        scoring them as bets: fair and real prices, e-BH
+  scripts/ev_followup.py     the checks that killed one money result and not the other
+  scripts/ev_window.py       pre-registration 2: money at the open on an unseen window
   reproduce.sh               every number in the report, one command
   results/                   what reproduce.sh wrote — the files the report cites
 ```
@@ -61,6 +75,7 @@ redistributing data derived from it, and the prices are a third party's.
 `results/data_manifest.json` holds the SHA-256 of every input file, so a copy
 shown to a reviewer can be checked against what the results were computed from.
 **The data-collection code** is not published for the same reason.
+
 
 ## Reproducing
 

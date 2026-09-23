@@ -90,6 +90,42 @@ Written by `scripts/cite_numbers.py` from the JSON files in this folder. Text di
 | search: c0031, lead on A / on unseen premium [99%] / survives | +0.0008 / −0.0005 [−0.0015, +0.0006] / no | `search.json · candidates[id=c0031]` |
 | search: c0034, lead on A / on unseen premium [99%] / survives | +0.0006 / −0.0014 [−0.0026, −0.0001] / no | `search.json · candidates[id=c0034]` |
 | search: c0159, lead on A / on unseen premium [99%] / survives | +0.0005 / −0.0038 [−0.0058, −0.0019] / no | `search.json · candidates[id=c0159]` |
+| e-value audit P1, fair (3,078 bouts) | 2.5e+08 | `evalue_audit.json · confirmatory.primary.P1.e_fair` |
+| e-value audit P2, fair (409 bouts) | 4.4 | `evalue_audit.json · confirmatory.primary.P2.e_fair` |
+| e-value audit P3, real prices (3,077 bouts) | 3.9e+08 | `evalue_audit.json · confirmatory.primary.P3.e_real` |
+| e-value audit P4, real prices (3,078 bouts) | 1.23e+03 | `evalue_audit.json · confirmatory.primary.P4.e_real` |
+| e-value audit C1, the price recalibrated with no model | 0.107 | `evalue_audit.json · confirmatory.control.C1.e_fair` |
+| e-value audit: slices at e ≥ 20, of 61 | 30 | `evalue_audit.json · confirmatory.count_e_ge_20` |
+| e-value audit B01: the closing favourite is underpriced | 0.0673 | `evalue_audit.json · confirmatory.family.B01.e_fair` |
+| e-value audit B03: a fighter on a 10+ win streak, against one who is not, is overpriced | 0.285 | `evalue_audit.json · confirmatory.family.B03.e_fair` |
+| e-value audit B05: the home fighter is mispriced (either way) | 2.03 | `evalue_audit.json · confirmatory.family.B05.e_fair` |
+| e-value audit: largest of the 16 price biases | 13 | `evalue_audit.json · confirmatory.family.B*` |
+| e-value audit null: slices at e ≥ 20, mean / 95th pct | 0.23 / 1 | `evalue_null.json · count_e_ge_20` |
+| money at Bet365's true close (kickoff), real e (1,539 bouts) | 1.15 | `evalue_followup.json · close_by_snapshot.kickoff.e_real` |
+| money at Bet365's open, model without fight-week data, real e | 1.2e+08 | `evalue_followup.json · open.open_safe_model.e_real` |
+| money at the open, price-only controls | 1.23 / 0.246 | `evalue_followup.json · open.controls_no_model` |
+| every favourite at Bet365's open, flat | −0.5% [−2.1%, +1.0%] | `evalue_followup.json · open.every_favourite_flat` |
+| flat stakes at Bet365's open, λ 0.25 (1,322 bets) | +10.9% [+6.2%, +15.9%] | `evalue_followup.json · open.flat_by_lambda.0.25` |
+| money at the open, by year (2023 / 2024 / 2025) | 2.78e+03 / 92.6 / 171 | `evalue_followup.json · open.by_year` |
+| money at the open under a simulated null, mean e | 0.20 | `evalue_followup.json · open.null_real.mean_e` |
+| line moved towards the model's bets | 69% | `evalue_followup.json · open.clv_of_lambda_0.25_bets` |
+| days from Bet365's open to the bell, median | 3 | `evalue_followup.json · open.days_open_to_bout` |
+| money at ProBoxingOdds' open, 2023–2025, real e / flat λ 0.25 | 7.0e+06 / +12.2% [+6.8%, +18.2%] | `evalue_followup.json · proboxingodds_open` |
+| log-loss 2023–2025, model | 0.3590 | `evalue_followup.json · log_loss.model` |
+| log-loss 2023–2025, open | 0.3506 | `evalue_followup.json · log_loss.open` |
+| log-loss 2023–2025, open plus model 0.15 | 0.3439 | `evalue_followup.json · log_loss.open_plus_model_0.15` |
+| log-loss 2023–2025, open plus model 0.25 | 0.3411 | `evalue_followup.json · log_loss.open_plus_model_0.25` |
+| log-loss 2023–2025, open plus model 0.35 | 0.3396 | `evalue_followup.json · log_loss.open_plus_model_0.35` |
+| log-loss 2023–2025, close | 0.3379 | `evalue_followup.json · log_loss.close` |
+| log-loss 2023–2025, close plus model 0.15 | 0.3336 | `evalue_followup.json · log_loss.close_plus_model_0.15` |
+| prereg 2 window A (primary): bouts / real e / fair e | 2,016 / 7.0e+06 / 1.7e+16 | `window_a.json · n_primary, primary` |
+| prereg 2 window A (primary): flat ROI range over λ | +18% to +24% | `window_a.json · flat_by_lambda` |
+| prereg 2 window A (primary): by year | 2016 1.4 · 2017 39.4 · 2018 8.45 · 2019 1.53e+03 · 2020 1.6 | `window_a.json · by_year` |
+| prereg 2 window A (primary) null: mean e / share ≥ 20 | 0.26 / 0.0% | `window_a_null.json · null` |
+| prereg 2 window B (secondary): bouts / real e / fair e | 1,545 / 12.5 / 604 | `window_b.json · n_primary, primary` |
+| prereg 2 window B (secondary): flat ROI range over λ | −1% to +19% | `window_b.json · flat_by_lambda` |
+| prereg 2 window B (secondary): by year | 2021 1.25 · 2022 11.6 · 2023 0.814 | `window_b.json · by_year` |
+| prereg 2 window B (secondary) null: mean e / share ≥ 20 | 0.31 / 0.0% | `window_b_null.json · null` |
 | calibration slope, corpus | 1.004 | `calibration.json · corpus.calibration_slope` |
 | calibration slope, premium | 1.009 | `calibration.json · premium.calibration_slope` |
 | calibration slope, quoted | 0.924 | `calibration.json · quoted.calibration_slope` |

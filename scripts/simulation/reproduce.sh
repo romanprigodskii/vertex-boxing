@@ -78,6 +78,22 @@ if [ -z "$ONLY" ] || [ "$ONLY" = scoreboard_pbo3 ]; then
     > "$L/scoreboard_pbo3.log" 2>&1
 fi
 
+# 1c. A third price feed, from a different source altogether: BetsAPI, which is
+#     Bet365's own line with the price at the moment the bout went in-play as the
+#     close (backfill_betsapi.py; prices from late 2020 only). Scored by the SAME
+#     model — the cutoff is pinned to the published one — so on the bouts both
+#     feeds price only the price differs, and betsapi_check.py says whether the
+#     two feeds agree, and what the model does on the bouts only Bet365 prices.
+if [ -z "$ONLY" ] || [ "$ONLY" = scoreboard_betsapi ]; then
+  echo "== scoreboard_betsapi  $(date '+%H:%M:%S')"
+  VERTEX_ODDS="$(cd ../.. && pwd)/imports/staging/odds_external/betsapi.parquet" \
+    "$PY" -u scripts/market_eval.py --tag l6 --tta --mirror --xt --blend \
+    --seeds 3 --cutoff 2023-06-10 --label final-close-betsapi \
+    --json "$R/robustness_betsapi.json" > "$L/scoreboard_betsapi.log" 2>&1
+fi
+step betsapi_check scripts/betsapi_check.py final-close final-close-betsapi \
+     --json "$R/diagnostics/betsapi.json"
+
 # 1c. The margin carried by each of the three readings of the board.
 step board_margin scripts/board_margin.py --json "$R/board_margins.json"
 
@@ -118,6 +134,33 @@ step leak_check scripts/leak_check.py l6 --feats everyz
 for c in mirror_check leak_check; do
   [ -f "$L/$c.log" ] && cp "$L/$c.log" "$R/checks/$c.txt"
 done
+
+# 6b. REPORT section 9: the e-value audits. Three extra models, each trained
+#     without the features settled in fight week (weigh-in, referee, the card's
+#     judges, running order), because the bets they score are struck at the
+#     opening price. The first reads 2023-06 on, the other two the windows of
+#     docs/evalue_protocol_2.md. Every scorer validates on simulated outcomes
+#     before it reads a real one.
+PBO3="$(cd ../.. && pwd)/imports/staging/proboxingodds_v3.parquet"
+for m in "openinfo-close 2023-06-10" "win-a-model 2016-06-10" "win-b-model 2021-06-10"; do
+  set -- $m
+  if [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; then
+    echo "== $1  $(date '+%H:%M:%S')"
+    VERTEX_ODDS="$PBO3" "$PY" -u scripts/market_eval.py --tag l6 --tta --mirror --xt --seeds 3 \
+      --cutoff "$2" --drop weigh+ref+judc+cardpos --label "$1" > "$L/$1.log" 2>&1
+  fi
+done
+step evalue_null scripts/ev_audit.py --null 1000 --json "$R/evalue_null.json"
+step evalue_audit scripts/ev_audit.py --json "$R/evalue_audit.json"
+step evalue_followup scripts/ev_followup.py --json "$R/evalue_followup.json"
+step window_a_null scripts/ev_window.py --label win-a-model --odds proboxingodds_v3.parquet \
+     --from 2016-06-10 --to 2020-06-10 --null 1000 --json "$R/window_a_null.json"
+step window_b_null scripts/ev_window.py --label win-b-model --odds odds_external/betsapi.parquet \
+     --from 2021-06-10 --to 2023-06-10 --null 1000 --json "$R/window_b_null.json"
+step window_a scripts/ev_window.py --label win-a-model --odds proboxingodds_v3.parquet \
+     --from 2016-06-10 --to 2020-06-10 --real --json "$R/window_a.json"
+step window_b scripts/ev_window.py --label win-b-model --odds odds_external/betsapi.parquet \
+     --from 2021-06-10 --to 2023-06-10 --real --json "$R/window_b.json"
 
 # 7. The figure and the table of every published number with its source, both
 #    written from results/ alone.

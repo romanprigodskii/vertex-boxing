@@ -30,6 +30,16 @@
    "sha256": "3e4a0dfeae44f8b1a5d80086a2b666e2a3d7e43d02b74133ecaf87608ccceea5",
    "bytes": 1681923,
    "what": "Polymarket boxing trades, from the on-chain history"
+  },
+  "proboxingodds_v3.parquet": {
+   "sha256": "e3de25344156457bedda074775acb587638e62b415d980e37015d223000cf7b2",
+   "bytes": 566405,
+   "what": "the ProBoxingOdds re-crawl with the fixed parser: opening prices for pre-registration 2, window A"
+  },
+  "odds_external/betsapi.parquet": {
+   "sha256": "1ecf8a9eadbcd90ada37e37c4fb6c708bc4abf6ddf4c9050acdda80467127f1a",
+   "bytes": 262922,
+   "what": "Bet365 opening and closing lines from BetsAPI, as of 2026-09-23 16:44 MSK: the e-value audits and window B"
   }
  }
 }

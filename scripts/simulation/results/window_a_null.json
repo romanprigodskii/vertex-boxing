@@ -1,0 +1,16 @@
+{
+ "label": "win-a-model",
+ "odds": "proboxingodds_v3.parquet",
+ "from": "2016-06-10",
+ "to": "2020-06-10",
+ "n_all": 2566,
+ "n_primary": 2016,
+ "threshold": 20.0,
+ "null": {
+  "reps": 1000,
+  "mean_e": 0.25960719501519275,
+  "se": 0.008409280324436517,
+  "share_ge_threshold": 0.0,
+  "max": 7.610604617578593
+ }
+}
