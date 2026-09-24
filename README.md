@@ -54,6 +54,7 @@ docs/odds.md                 where historical boxing prices exist, and where the
 docs/evalue_protocol.md      pre-registration 1: the e-value audit against Bet365
 docs/evalue_protocol_2.md    pre-registration 2, timestamped: the opening price on 2016–2020
 docs/evalue_protocol_3.md    pre-registration 3, timestamped: which bouts, and a 2026 holdout
+docs/evalue_protocol_4.md    pre-registration 4, timestamped: the live test, on bouts after 2026-09-25
 scripts/simulation/
   src/features.py            the point-in-time replay: 231 features, both orientations
   scripts/market_eval.py     the scoreboard: model vs the closing line, and the blend
@@ -68,6 +69,7 @@ scripts/simulation/
   scripts/ev_followup.py     the checks that killed one money result and not the other
   scripts/ev_window.py       pre-registration 2: money at the open on an unseen window
   scripts/ev_rules.py        pre-registration 3: choose the rule, then one holdout run
+  scripts/ev_forward.py      pre-registration 4: the frozen rule, scored at any checkpoint
   reproduce.sh               every number in the report, one command
   results/                   what reproduce.sh wrote — the files the report cites
 ```

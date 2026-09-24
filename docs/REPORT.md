@@ -562,10 +562,15 @@ names.
   be tested, and it is untestable where it was aimed.
 - **Coverage.** Only 25–37% of title-level bouts carry a price in any year, so
   the betting-side intervals are wide by necessity.
-- **No forward test.** Every number here is historical. The one test that would
-  settle the money question is to publish predictions and opening prices before
-  the bell, timestamped as section 9.2 was, and grade them against what
-  happened.
+- **The forward test is registered, not run.** Every number here is historical.
+  [`evalue_protocol_4.md`](evalue_protocol_4.md), pushed on 24 September 2026
+  before any of the bouts it covers, freezes one rule. The model is trained to
+  2026-07-24 and blended into Bet365's opening price at λ = 0.10, betting 1 unit
+  wherever the blend beats the posted decimal. The test is an e-value on the
+  rule's own bets, readable at any checkpoint, rejected at 20, and ends on
+  2029-09-25. The weight 0.10 was picked after the 2026 holdout was scored,
+  which is why only bouts that had not happened can test it. At roughly 60 to 90
+  bets a year, an answer is one to four years away.
 
 ## Reproducing
 
