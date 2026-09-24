@@ -296,6 +296,22 @@ def main() -> None:  # noqa: PLR0915
             add(f"prereg 2 {name} null: mean e / share ≥ 20", f"{rn['null']['mean_e']:.2f} / {rn['null']['share_ge_threshold']:.1%}",
                 f"window_{w}_null.json · null")
 
+    rd = load("rules_dev.json")
+    if rd:
+        for r, v in rd["total_log_e"].items():
+            add(f"prereg 3: {r}, summed log e over the selection windows", f"{v:.1f}", f"rules_dev.json · total_log_e.{r}")
+        add("prereg 3: the rule chosen", rd["selected"], "rules_dev.json · selected")
+    rh = load("rules_holdout.json")
+    if rh:
+        add(f"prereg 3 holdout: {rh['selected']}, bouts / real e", f"{rh['primary']['n']} / {rh['primary']['e_real']:.1f}",
+            "rules_holdout.json · primary")
+        for r, v in rh["others"].items():
+            add(f"prereg 3 holdout: {r}, bouts / real e", f"{v['n']} / {v['e_real']:.1f}", f"rules_holdout.json · others.{r}")
+    rn = load("rules_holdout_null.json")
+    if rn:
+        add("prereg 3 holdout null: mean e / share ≥ 20", f"{rn['null']['mean_e']:.2f} / {rn['null']['share_ge_20']:.1%}",
+            "rules_holdout_null.json · null")
+
     cal = load("calibration.json")
     if cal:
         for k in ("corpus", "premium", "quoted"):

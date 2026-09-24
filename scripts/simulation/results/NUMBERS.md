@@ -126,6 +126,17 @@ Written by `scripts/cite_numbers.py` from the JSON files in this folder. Text di
 | prereg 2 window B (secondary): flat ROI range over λ | −1% to +19% | `window_b.json · flat_by_lambda` |
 | prereg 2 window B (secondary): by year | 2021 1.25 · 2022 11.6 · 2023 0.814 | `window_b.json · by_year` |
 | prereg 2 window B (secondary) null: mean e / share ≥ 20 | 0.31 / 0.0% | `window_b_null.json · null` |
+| prereg 3: R0, summed log e over the selection windows | 36.8 | `rules_dev.json · total_log_e.R0` |
+| prereg 3: R1, summed log e over the selection windows | 29.2 | `rules_dev.json · total_log_e.R1` |
+| prereg 3: R2, summed log e over the selection windows | 21.7 | `rules_dev.json · total_log_e.R2` |
+| prereg 3: R3, summed log e over the selection windows | 18.3 | `rules_dev.json · total_log_e.R3` |
+| prereg 3: the rule chosen | R0 | `rules_dev.json · selected` |
+| prereg 3 holdout: R0, bouts / real e | 541 / 41.8 | `rules_holdout.json · primary` |
+| prereg 3 holdout: R0, bouts / real e | 541 / 41.8 | `rules_holdout.json · others.R0` |
+| prereg 3 holdout: R1, bouts / real e | 404 / 39.9 | `rules_holdout.json · others.R1` |
+| prereg 3 holdout: R2, bouts / real e | 243 / 3.9 | `rules_holdout.json · others.R2` |
+| prereg 3 holdout: R3, bouts / real e | 192 / 3.2 | `rules_holdout.json · others.R3` |
+| prereg 3 holdout null: mean e / share ≥ 20 | 0.51 / 0.0% | `rules_holdout_null.json · null` |
 | calibration slope, corpus | 1.004 | `calibration.json · corpus.calibration_slope` |
 | calibration slope, premium | 1.009 | `calibration.json · premium.calibration_slope` |
 | calibration slope, quoted | 0.924 | `calibration.json · quoted.calibration_slope` |

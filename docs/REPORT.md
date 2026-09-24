@@ -23,15 +23,18 @@ available odds cover, and the claim points the wrong way.
   +0.0180 on twelve-rounders, and three independent markers of level agree. On
   a window the rule was never chosen on, the top of the market gave 2.0 times
   the closing-line value of the bottom.
-- **At the closing price it makes no money. At the opening price it did, in two
-  of three windows, one of them pre-registered in public.** Bets struck at
+- **At the closing price it makes no money. At the opening price it did, in three
+  of four windows, two of them pre-registered in public.** Bets struck at
   Bet365's closing price are worth nothing (section 9). Bets struck at the
   opening price, with the model blended into that price, returned:
   - at Bet365 over 2023–2025: +10.9% [+6.2%, +15.9%];
   - at ProBoxingOdds over 2016–2020: +18% to +24%, in a test whose protocol was
     timestamped in the Bitcoin blockchain and pushed to this repository before
     any of it ran (e = 7.0 × 10⁶ against a bar of 20);
-  - at Bet365 over 2021–2023: nothing that clears the bar (e = 12.5).
+  - at Bet365 over 2021–2023: nothing that clears the bar (e = 12.5);
+  - at Bet365 over the first seven months of 2026, a holdout nobody had bet on,
+    with the rule chosen and published before the holdout model was trained:
+    e = 41.8 against a bar of 20.
 
   The model does not out-forecast the opening price on its own. It forecasts
   where the price is going. No real bet was placed, everything is a backtest,
@@ -269,8 +272,8 @@ actually happened, with a test that pays for how many questions it asks. The
 reading above holds for the close: there is no money there. It does not hold
 for the open. The rule above backs the raw model wherever it disagrees with the
 price by two points. A rule that backs the model blended into the opening price,
-and only where that blend beats the posted decimal, made money in two windows
-out of three.
+and only where that blend beats the posted decimal, made money in three windows
+out of four.
 
 **A correction made for this report.** Until September the script behind this
 table took the margin out of the open proportionally and out of the close by
@@ -507,12 +510,42 @@ none of 1,000 at 20). Window A's evidence is uneven. 2019 carries most of it
 Window B falls short, and there the model alone is 0.025 nats worse than
 Bet365's open.
 
-### 9.3 What this does and does not show
+### 9.3 Choosing which bouts, then a holdout
+
+The report's own tables say the model adds least on club bouts, so the obvious
+next rule leaves them out. To keep that choice from being fitted to the windows
+above, [`evalue_protocol_3.md`](evalue_protocol_3.md) fixed three things before
+any of them was scored:
+- four candidates: every bout (R0), no club bouts (R1), title bouts (R2) and the
+  report's upper tier (R3);
+- the choice: the largest summed log e-value at real opening prices over the
+  three windows already used;
+- a holdout: 2026-01-01 to 2026-07-24, with a model trained to 2025-12-31 and
+  one run.
+
+Each step was pushed here before the next began. GitHub records the protocol at
+05:46:33 UTC on 24 September, the choice at 05:47:15, and the result at 06:00:28.
+
+| rule | A 2016–20 | B 2021–23 | C 2023–25 | summed log e | **holdout 2026**, bouts / e |
+|---|---|---|---|---|---|
+| R0 every bout | 7.0 × 10⁶ | 12.5 | 1.1 × 10⁸ | **36.8, chosen** | **541 / 41.8, past 20** |
+| R1 no club bouts | 9.1 × 10⁵ | 7.0 | 7.3 × 10⁵ | 29.2 | 404 / 39.9 |
+| R2 title bouts | 2,880 | 11.7 | 8.3 × 10⁴ | 21.7 | 243 / 3.9 |
+| R3 upper tier | 700 | 5.7 | 2.1 × 10⁴ | 18.3 | 192 / 3.2 |
+
+Leaving the club bouts out lowers the evidence in every window. What the model
+lacks against the *closing* price on club bouts it does not lack against the
+opening one. The chosen rule passed on the holdout after its null check (mean
+e 0.51, none of 1,000 at 20). Flat stakes there are positive at every λ. Their
+intervals exclude zero only at λ 0.10 and 0.15: 541 bouts is a small window
+(`rules_dev.json`, `rules_holdout.json`).
+
+### 9.4 What this does and does not show
 
 It shows that a model which reads records and ratings forecasts where the
 boxing line will move. Blended into the opening price, that forecast made money
-at the opening price in two windows out of three, one of them fixed in public
-before it ran. It does not show that the model beats the market: it loses to
+at the opening price in three windows out of four. Two of those three were fixed
+in public before they ran. It does not show that the model beats the market: it loses to
 both prices on its own and makes nothing at the close.
 
 Nor does it show that the money can be taken now. ProBoxingOdds' opening line
@@ -543,8 +576,8 @@ cd scripts/simulation
 ```
 
 The e-value audits of section 9 are steps too (`evalue_null`, `evalue_audit`,
-`evalue_followup`, `window_a`, `window_b`), and so are the three models they
-need. `ev_window.py` reads outcomes only when given `--real`.
+`evalue_followup`, `window_a`, `window_b`, `rules_dev`, `rules_holdout`), and so
+are the four models they need. `ev_window.py` reads outcomes only when given `--real`.
 
 Each file in `results/` is written by one script, and
 [`results/NUMBERS.md`](../scripts/simulation/results/NUMBERS.md) maps every

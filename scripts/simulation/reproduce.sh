@@ -135,14 +135,14 @@ for c in mirror_check leak_check; do
   [ -f "$L/$c.log" ] && cp "$L/$c.log" "$R/checks/$c.txt"
 done
 
-# 6b. REPORT section 9: the e-value audits. Three extra models, each trained
+# 6b. REPORT section 9: the e-value audits. Four extra models, each trained
 #     without the features settled in fight week (weigh-in, referee, the card's
 #     judges, running order), because the bets they score are struck at the
-#     opening price. The first reads 2023-06 on, the other two the windows of
-#     docs/evalue_protocol_2.md. Every scorer validates on simulated outcomes
+#     opening price. The first reads 2023-06 on, the next two the windows of
+#     docs/evalue_protocol_2.md, the last the 2026 holdout of evalue_protocol_3.md. Every scorer validates on simulated outcomes
 #     before it reads a real one.
 PBO3="$(cd ../.. && pwd)/imports/staging/proboxingodds_v3.parquet"
-for m in "openinfo-close 2023-06-10" "win-a-model 2016-06-10" "win-b-model 2021-06-10"; do
+for m in "openinfo-close 2023-06-10" "win-a-model 2016-06-10" "win-b-model 2021-06-10" "hold-model 2025-12-31"; do
   set -- $m
   if [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]; then
     echo "== $1  $(date '+%H:%M:%S')"
@@ -161,6 +161,9 @@ step window_a scripts/ev_window.py --label win-a-model --odds proboxingodds_v3.p
      --from 2016-06-10 --to 2020-06-10 --real --json "$R/window_a.json"
 step window_b scripts/ev_window.py --label win-b-model --odds odds_external/betsapi.parquet \
      --from 2021-06-10 --to 2023-06-10 --real --json "$R/window_b.json"
+step rules_dev scripts/ev_rules.py dev --json "$R/rules_dev.json"
+step rules_holdout_null scripts/ev_rules.py holdout --null 1000 --json "$R/rules_holdout_null.json"
+step rules_holdout scripts/ev_rules.py holdout --real --json "$R/rules_holdout.json"
 
 # 7. The figure and the table of every published number with its source, both
 #    written from results/ alone.

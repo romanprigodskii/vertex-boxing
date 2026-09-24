@@ -22,6 +22,7 @@ measured.
 | return at the closing price, upper tier | −0.6% (proportional) to **−6.1%** (power de-vig) |
 | money at Bet365's close, bets settled on real outcomes | none (e = 1.15) |
 | money at the **opening** price, the model blended into it | **+18% to +24%** on 2016–2020, pre-registered in public; +10.9% on 2023–2025; not past the bar on 2021–2023 |
+| the same rule on a 2026 holdout, chosen and published before it was touched | e = 41.8 against a bar of 20 |
 | a pre-registered random search, 200 configurations | nothing survives on unseen bouts |
 | a post-bell leak caught in the project's own data | P(stoppage) 0.097 vs 0.743 |
 | real bets placed | 0 |
@@ -32,9 +33,11 @@ of the sport, not the bottom: closing-line value rises with the scheduled
 distance, and three independent markers of level agree.
 
 What it knows is where the line is going. At the close it makes no money. At
-the opening price, blended into that price, it made money in two windows of
-three. One of those two was a test whose protocol was timestamped in the Bitcoin
-blockchain and pushed here before it ran ([`evalue_protocol_2.md`](docs/evalue_protocol_2.md)).
+the opening price, blended into that price, it made money in three windows of
+four. Two of those three were tests whose protocols were timestamped in the
+Bitcoin blockchain and pushed here before they ran
+([`evalue_protocol_2.md`](docs/evalue_protocol_2.md),
+[`evalue_protocol_3.md`](docs/evalue_protocol_3.md)).
 All of it is a backtest. No bet was placed, and an account that wins at the
 open gets limited.
 
@@ -50,6 +53,7 @@ docs/status.md               the lab notebook, in Russian (the 2026-08-04 state 
 docs/odds.md                 where historical boxing prices exist, and where they do not
 docs/evalue_protocol.md      pre-registration 1: the e-value audit against Bet365
 docs/evalue_protocol_2.md    pre-registration 2, timestamped: the opening price on 2016–2020
+docs/evalue_protocol_3.md    pre-registration 3, timestamped: which bouts, and a 2026 holdout
 scripts/simulation/
   src/features.py            the point-in-time replay: 231 features, both orientations
   scripts/market_eval.py     the scoreboard: model vs the closing line, and the blend
@@ -63,6 +67,7 @@ scripts/simulation/
   scripts/ev_audit.py        scoring them as bets: fair and real prices, e-BH
   scripts/ev_followup.py     the checks that killed one money result and not the other
   scripts/ev_window.py       pre-registration 2: money at the open on an unseen window
+  scripts/ev_rules.py        pre-registration 3: choose the rule, then one holdout run
   reproduce.sh               every number in the report, one command
   results/                   what reproduce.sh wrote — the files the report cites
 ```
