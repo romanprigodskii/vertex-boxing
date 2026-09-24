@@ -1,0 +1,7 @@
+# SHA-256 of what pre-registration 4 freezes. Timestamped: evalue_protocol_4.manifest.ots
+7a4ec9d20a9b2d00f9be805a0c3c2786f9ff7186742a4927999b98de37d4e88f  docs/evalue_protocol_4.md
+32db30e39ca80707ccfdbc90b278f36a2d87d7044b7b7256e1e2aaf67ef7cfc9  scripts/simulation/scripts/ev_forward.py
+28b846e4e3800478dbb2414a11300fe6b92d8a9719d1615ce937782d50359d28  scripts/simulation/scripts/ev_window.py
+0309e4797fe411a6a4ee96d33accdf87680304550d218844a5f23dc3d041f626  scripts/simulation/scripts/market_eval.py
+b827f085d511bb3fe8dd39a0f01a3d6f51b1c81ab930fff2153c62bd3dafa1a6  scripts/simulation/src/features.py
+de7b73b4f59e373abc764c70934c15821799cf382a8dfffd0cbb57df1e7fd8fe  <data> corpus_l6.parquet (the frozen training corpus, not published)
